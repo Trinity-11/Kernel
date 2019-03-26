@@ -491,10 +491,18 @@ buffer_char     STA #MLINEBUF,B,Y
                 JSL IPUTC
 
                 ; Print the address
-                setdbr `MCURSOR
+                setdbr `MCURSOR         ; Bank byte first
                 setxl
                 LDX #MCURSOR+2
-                LDY #3
+                LDY #1
+                JSL IPRINTH
+
+                LDA #':'                ; then a colon
+                JSL IPUTC
+
+                setxl
+                LDX #MCURSOR+1
+                LDY #2
                 JSL IPRINTH
 
                 ; Set the counter for the number of bytes per row
