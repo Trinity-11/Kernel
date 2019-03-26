@@ -98,13 +98,13 @@ CLEAR_MEM_LOOP
 ;                STA SDCARD_CMD;
                 setaxl
                 ; Initialize Super IO Chip
-                JSL INITCODEC
+                ;JSL INITCODEC
                 ;LDA SDCARD_DATA;
 
-                JSL INITSUPERIO
+                ;JSL INITSUPERIO
 
                 ; Init the RTC (Test the Interface)
-                JSL INITRTC
+                ;JSL INITRTC
                 ; INIT The FONT Memory
 
                 ; Init Globacl Look-up Table
@@ -148,13 +148,37 @@ greet           setdbr `greet_msg       ;Set data bank to ROM
                 LDX #<>init_kbrd_msg
                 JSL IPRINT       ; print the Keybaord Init Message
 
-                JSL INITKEYBOARD ;
-                JSL ITESTSID
+
+                setal
+                LDA #$0000
+                STA @lMCURSOR
+                STA @lMCURSOR+2
+
+                LDA #<>greet_msg
+                STA @lMARG1
+                LDA #`greet_msg
+                STA @lMARG1+2
+
+                LDA #<>greet_msg+$40
+                STA @lMARG2
+                LDA #`greet_msg
+                STA @lMARG2+2
+
+                setas
+                LDA #1
+                STA MARG_LEN
+
+                JSL MMEMORY
+LOCK            JMP LOCK
+
+
+                ;JSL INITKEYBOARD ;
+                ;JSL ITESTSID
 
                 setaxl
                 LDX #<>OPL2_test_msg
                 JSL IPRINT       ; print the first line
-                JSL OPL2_TONE_TEST
+                ;JSL OPL2_TONE_TEST
 
                 JSL SDOS_INIT;       // Go Init the CH376S in SDCARD mod
                 JSL SDOS_DIR
@@ -596,16 +620,24 @@ IPUTB
 ; Prints a carriage return.
 ; This moves the cursor to the beginning of the next line of text on the screen
 ; Modifies: Flags
-IPRINTCR	PHX
+IPRINTCR	      PHP
+                setxl
+                PHX
                 PHY
-                PHP
+                PHD
+
+                setdp 0
+
                 LDX #0
                 LDY CURSORY
                 INY
                 JSL ILOCATE
-                PLP
+                
+                setxl
+                PLD
                 PLY
                 PLX
+                PLP
                 RTL
 ;
 ; IPRINTBS
@@ -665,9 +697,13 @@ ICSRDOWN	      RTL
 ; X: column to set cursor
 ; Y: row to set cursor
 ;Modifies: none
-ILOCATE         PHA
-                PHP
+ILOCATE         PHP
+                PHD
                 setaxl
+                PHA
+
+                setdp 0
+                
 ilocate_scroll  ; If the cursor is below the bottom row of the screen
                 ; scroll the screen up one line. Keep doing this until
                 ; the cursor is visible.
@@ -700,8 +736,11 @@ ilocate_right   CLC
                 STA @lVKY_TXT_CURSOR_Y_REG_L  ;Store in Vicky's registers
                 TXA
                 STA @lVKY_TXT_CURSOR_X_REG_L  ;Store in Vicky's register
-ilocate_done    PLP
+
+ilocate_done    setaxl
                 PLA
+                PLD
+                PLP
                 RTL
 ;
 ; ISCROLLUP
@@ -748,7 +787,10 @@ ISCROLLUP       ; Scroll the screen up by one row
 ; Modifies:
 ;   X,Y, results undefined
 IPRINTH         PHP
+                setaxl
                 PHA
+
+
 iprinth1        setas
                 LDA #0,b,x      ; Read the value to be printed
                 LSR
@@ -761,6 +803,8 @@ iprinth1        setas
                 DEX
                 DEY
                 BNE iprinth1
+
+                setaxl
                 PLA
                 PLP
                 RTL
@@ -774,13 +818,19 @@ iprinth1        setas
 ; Affects:
 ;   P: m flag will be set to 0
 iprint_digit    PHX
+                PHB
+
+                setdbr `hex_digits
+
                 setal
                 AND #$0F
                 TAX
+
                 ; Use the value in AL to
-                .databank ?
                 LDA hex_digits,X
                 JSL IPUTC       ; Print the digit
+
+                PLB
                 PLX
                 RTL
 ;

@@ -167,6 +167,10 @@ MARG5            = $00026D ;4 Bytes First command argument. May be data or addre
 MARG6            = $000271 ;4 Bytes First command argument. May be data or address, depending on command. Data is 32-bit number. Address is 24-bit address and 8-bit length.
 MARG7            = $000275 ;4 Bytes First command argument. May be data or address, depending on command. Data is 32-bit number. Address is 24-bit address and 8-bit length.
 MARG8            = $000279 ;4 Bytes First command argument. May be data or address, depending on command. Data is 32-bit number. Address is 24-bit address and 8-bit length.
+MCURSOR          = $00027D ;3 Bytes Pointer to the current memory location for disassembly, memory dump, etc.
+MLINEBUF         = $000280 ;17 Byte buffer for dumping memory (TODO: could be moved to a general string scratch area)
+MARG_LEN         = $000291 ;1 Byte count of the number of arguments passed
+MCOUNT           = $000292 ;2 Byte counter
 
 LOADFILE_VARS    = $000300 ; Byte
 LOADFILE_NAME    = $000300 ;3 Bytes (addr) Name of file to load. Address in Data Page
