@@ -171,6 +171,8 @@ MCURSOR          = $00027D ;3 Bytes Pointer to the current memory location for d
 MLINEBUF         = $000280 ;17 Byte buffer for dumping memory (TODO: could be moved to a general string scratch area)
 MARG_LEN         = $000291 ;1 Byte count of the number of arguments passed
 MCOUNT           = $000292 ;2 Byte counter
+MTEMP            = $000294 ;4 Bytes of temporary space
+MCPUSTAT         = $000299 ;1 Byte to represent what the disassembler thinks the processor MX bits are
 
 LOADFILE_VARS    = $000300 ; Byte
 LOADFILE_NAME    = $000300 ;3 Bytes (addr) Name of file to load. Address in Data Page

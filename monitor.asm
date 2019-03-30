@@ -399,7 +399,8 @@ MMEMROWSIZE = 8    ; Number of bytes to dump per-row
 ; Author:
 ;   PJW
 ;
-IMMEMORY        PHP
+IMMEMORY        .proc
+                PHP
                 PHB
                 PHD
 
@@ -567,6 +568,9 @@ done            PLD
 
 continue        JMP dump_line
                 .dpage 0
+                .pend
+
+.include "assembler.asm"
                 
 
 ;

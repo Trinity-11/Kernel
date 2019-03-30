@@ -148,29 +148,24 @@ greet           setdbr `greet_msg       ;Set data bank to ROM
                 LDX #<>init_kbrd_msg
                 JSL IPRINT       ; print the Keybaord Init Message
 
-
+                ;
+                ; Test the disassembler
+                ;
                 setal
-                LDA #$0000
-                STA @lMCURSOR
-                STA @lMCURSOR+2
-
-                LDA #<>greet_msg
-                STA @lMARG1
-                LDA #`greet_msg
-                STA @lMARG1+2
-
-                LDA #<>greet_msg+$40
-                STA @lMARG2
-                LDA #`greet_msg
-                STA @lMARG2+2
+                LDA #<>DISASSEMBLE
+                STA MARG1
+                LDA #`DISASSEMBLE
+                STA MARG1+2
 
                 setas
                 LDA #1
                 STA MARG_LEN
 
-                JSL MMEMORY
-LOCK            JMP LOCK
+                LDA #$C0
+                STA @lMCPUSTAT    ; Clear the M and X bits in the assembler's processor status flags
 
+                JSL DISASSEMBLE
+LOCK            JMP LOCK
 
                 ;JSL INITKEYBOARD ;
                 ;JSL ITESTSID
