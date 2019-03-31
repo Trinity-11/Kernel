@@ -152,16 +152,24 @@ greet           setdbr `greet_msg       ;Set data bank to ROM
                 ; Test the disassembler
                 ;
                 setal
-                LDA #<>DISASSEMBLE
+                LDA #<>SAMPLE
                 STA MARG1
-                LDA #`DISASSEMBLE
+                setas
+                LDA #`SAMPLE
                 STA MARG1+2
 
+                setal
+                LDA #<>SAMPLE + 32
+                STA MARG2
                 setas
-                LDA #1
+                LDA #`SAMPLE
+                STA MARG2+2
+
+                setas
+                LDA #2
                 STA MARG_LEN
 
-                LDA #$C0
+                LDA #$00
                 STA @lMCPUSTAT    ; Clear the M and X bits in the assembler's processor status flags
 
                 JSL DISASSEMBLE

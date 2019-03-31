@@ -3,18 +3,44 @@
 ;;;
 
 ;
+; Disassembler theory of operation:
+; DS_PR_LINE disassembles a line of machine code at MCURSOR
+; For any given opcode XX, it will look up a pointer to the mnemonic in MNEMONIC_TAB
+; and the addressing mode code in ADDRESS_TAB. The mnemonic will be printed by
+; DS_PR_MNEMONIC, and the operand by DS_PR_OPERAND (which uses the addressing mode
+; to determine how to print the operand and how many bytes are in the operand).
+;
+; DS_PR_LINE will also track the current values of the M and X bits from the status
+; register by taking REP and SEP instruction into account. These bits will be used
+; to determine operand size for certain immediate addressing cases. This method will
+; not be perfect, and the user will be expected to over-ride the values of M and X
+; when starting the disassembler.
+;
+
+; TODO: provide a means to over-ride the MX bits in MCPUSTAT
+
+;
 ; Macros
 ;
+
+; Macro to register a mnemonic... at the moment this just takes the name
+; Originally, it was going to take a type and basic opcode to help in assembly
+; but I now think that's nonsense.
 MNEMONIC    .macro ; text, type, opcode
             .text \1
-            .byte \2,\3
             .endm
 
 ;
 ; Definitions
 ;
 
-; Addressing modes
+;
+; Define the addressing modes...
+; Address modes specified in the address mode table will be of the format: MXaaaaaa
+; Where M will be set if the M bit is relevant to the operand of the instruction (e.g. LDA immediate, ORA immedate, etc.)
+;       X will be set if the X bit is relevant to the operand of the instruction (e.g. LDX immediate, CPY immediate, etc.)
+;   and aaaaa is the address mode enumeration below.
+;
 ADDR_DP_IND_X = 0       ; (dd,X)
 ADDR_DP = 1             ; dd
 ADDR_IMM = 2            ; #dd
@@ -38,6 +64,7 @@ ADDR_IMPLIED = 19       ; Implied (no operand)
 ADDR_XYC = 20           ; #dd, #dd
 ADDR_ABS_IND = 21       ; (dddd)
 ADDR_PC_REL_LONG = 22   ; PC relative ()
+ADDR_ABS_IND_LONG = 23  ; [dddd]
 
 OP_M_EFFECT = $80       ; Flag to indicate instruction is modified by M
 OP_X_EFFECT = $40       ; Flag to indicate instruction is modified by X
@@ -51,12 +78,38 @@ MN_CLASS_SB = 5
 MN_CLASS_BR = 6
 
 ;
+; Testing Notes:
+;   30/3/2019 -- PJW -- Verified: single byte instructions, branches, JMP, JML, JSR, and JSL.
+;   31/3/2019 -- PJW -- Verified: ADC, SBC, CPx, INx, AND, EOR, ORA, BIT, TRB, TSB
+;                       ASL, LSR, ROL, ROR, BRK, COP, MVN, MVP, NOP, PEA, PEI, PER
+;                       LDA, LDX, LDY, STA, STX, STY
+;
+; TODO: REP/SEP and M/X bit interactions
+;
+
+;
 ; Disassembler code
 ;
-                
-SAMPLE          .al
-                TAY
-                NOP
+
+; TODO: remove the sample code block     
+SAMPLE          .as
+                .xs
+                SEP #$30
+                LDA #$12
+                LDX #$34
+                .al
+                .xl
+                REP #$30
+                LDA #$5678
+                LDX #$789A
+                .as
+                .xs
+                SEP #$30
+                LDA #$BC
+                LDX #$DE
+                BRK
+                BRK
+                BRK
 
 ;
 ; Disassemble a block of memeory
@@ -118,6 +171,7 @@ no_args         setal
 dasm_loop       JSL DS_PR_LINE
 
                 ; Check to see if we've printed the last byte
+                setas
                 LDA MCURSOR+2           ; Are the banks the same?
                 CMP MARG2+2
                 BLT dasm_loop           ; No: continue
@@ -160,10 +214,43 @@ DS_PR_LINE      .proc
                 LDA #' '
                 JSL IPUTC
 
+                ; TODO: remove this for the real version
+                ; This is a work around for a suspected bug in the emulator
+                ; MTEMP = MCURSOR + 1
+                setal
+                CLC
+                LDA MCURSOR
+                ADC #1
+                STA MTEMP
+                setas
+                LDA MCURSOR+2
+                ADC #0
+                STA MTEMP+2
+
                 setas
                 setxl
-                LDA [MCURSOR]
-                setal
+                LDA [MCURSOR]           ; Get the mnemonic
+                CMP #$C2                ; Is it REP?
+                BNE check_sep           ; No: check to see if it is SEP
+
+                ; Handle the REP instruction
+handle_rep      PHA
+                LDA [MTEMP]             ; Get the operand
+                EOR #$FF                ; Invert the bits
+                AND @lMCPUSTAT          ; Mask off the bits in the CPUSTAT
+                BRA save_stat
+
+check_sep       CMP #$E2                ; Is it SEP?
+                BNE get_op_index        ; No: process the instruction regularly
+
+                ; Handle the SEP instruction
+handle_sep      PHA
+                LDA [MTEMP]             ; Get the operand
+                ORA @lMCPUSTAT          ; Activate the bits in the CPUSTAT
+save_stat       STA @lMCPUSTAT          ; And save it back
+                PLA
+
+get_op_index    setal
                 AND #$00FF
                 ASL A
                 TAX                     ; Get the index into the mnemonic lookup table
@@ -182,20 +269,6 @@ pr_operand      LDA ADDRESS_TAB,X       ; Get the addressing mode for the instru
 
                 JSL IPRINTCR
                 PLD
-                PLP
-                RTL
-                .pend
-
-;
-; Print an unknown opcode ???
-;
-DS_PR_UNKNOWN   .proc
-                PHP
-                setas
-                .rept 3
-                LDA #'?'
-                JSL IPUTC
-                .next
                 PLP
                 RTL
                 .pend
@@ -236,15 +309,14 @@ M_INC_CURSOR    .proc
 ;
 DS_PR_OPERAND   ;.proc
                 PHP
+
                 setas
-
-                PHA         ; Save the address mode so we can get to the M and X flags
-
-                ASL A       ; Compute the index to the table
+                PHA             ; Save the address mode so we can get to the M and X flags
+                AND #%00111111  ; Filter out the mode flags
+                ASL A           ; Compute the index to the table
                 setxl
                 TAX
-
-                PLA         ; Restore A
+                PLA             ; Restore A
 
                 JMP (dispatch,X)
 dispatch        .word <>is_dp_ind_x
@@ -270,6 +342,7 @@ dispatch        .word <>is_dp_ind_x
                 .word <>is_xyc
                 .word <>is_abs_ind
                 .word <>is_pc_rel_long
+                .word <>is_abs_ind_long
 
                 ; Addressing mode is zero-page-indirect-x
 is_dp_ind_x     LDA #'('                ; Print (dd,X)
@@ -288,14 +361,18 @@ is_dp           JSL DS_PR_OPERAND1      ; Print dd
                 JMP done_1
 
                 ; Addressing mode is immediate
-is_imm          setas                   
+is_imm          setas
+                PHA                   
                 LDA #'#'
                 JSL IPUTC
+                PLA
 
-                AND $%11000000          ; Filter so we just look at the mode bits
+                AND #%11000000          ; Filter so we just look at the mode bits
                 CMP #$00                ; Are any set to check?
                 BEQ is_imm_short        ; No: treat it as a short always
-                AND MCPUSTAT            ; Otherwise, filter the mode bit we care about
+                LSR A                   ; Move the flag bits right by 2 to match
+                LSR A                   ; the positions of the bits in the CPU status register
+                AND @lMCPUSTAT          ; Otherwise, filter the mode bit we care about
                 BNE is_imm_short        ; If it is set, immediate operation is short
 
                 ; Otherwise, the immediate should be a long
@@ -379,10 +456,7 @@ is_accumulator  LDA #'A'                ; Print A
                 JMP done
 
                 ; Addressing mode is stack relative
-is_stack_r      LDA #'#'                ; #dd,S
-                JSL IPUTC
-
-                JSL DS_PR_OPERAND1      ; Print dd
+is_stack_r      JSL DS_PR_OPERAND1      ; Print dd,S
 
                 LDA #','
                 JSL IPUTC
@@ -402,7 +476,7 @@ is_dp_long      LDA #'['                ; [dd]
 
                 ; Addressing mode is absolute long
 is_abs_long     JSL DS_PR_OPERAND3      ; Print dddddd
-                JMP done_1
+                JMP done
 
                 ; Addressing mode is stack relative indirect indexed by Y
 is_stack_r_y    LDA #'('                ; (dd,S),Y
@@ -452,7 +526,7 @@ is_abs_x_long   JSL DS_PR_OPERAND3      ; Print dddddd
                 JSL IPUTC
                 LDA #'X'
                 JSL IPUTC
-                JMP done_1
+                JMP done
 
                 ; Addressing mode with two immediates (used by move instructions)
 is_xyc          LDA #'#'
@@ -480,13 +554,19 @@ is_xyc          LDA #'#'
                 PLB                     ; Get our old data bank back
 
                 JSL M_INC_CURSOR
-                JSL M_INC_CURSOR
                 JMP done_1
 
 is_abs_ind      LDA #'('
                 JSL IPUTC
                 JSL DS_PR_OPERAND2      ; Print (dddd)
                 LDA #')'
+                JSL IPUTC
+                JMP done_1
+
+is_abs_ind_long LDA #'['
+                JSL IPUTC
+                JSL DS_PR_OPERAND2      ; Print [dddd]
+                LDA #']'
                 JSL IPUTC
                 JMP done_1
 
@@ -660,6 +740,8 @@ add_offset      setal
                 ; And print the resulting address
                 JSL M_PR_ADDR
 
+                JSL M_INC_CURSOR
+
                 PLD
                 PLP
                 RTL
@@ -805,7 +887,9 @@ MN_PEI      #MNEMONIC "PEI",MN_CLASS_IRR,$D4
 MN_PEA      #MNEMONIC "PEA",MN_CLASS_IRR,$F4
 MN_JML      #MNEMONIC "JML",MN_CLASS_IRR,$DC
 
-                ; A table of all 256 possible instruction slots, listing their mnemonics
+;
+; Map each opcode to its mnemonic
+;
 MNEMONIC_TAB    .word <>MN_BRK, <>MN_ORA, <>MN_COP, <>MN_ORA, <>MN_TSB, <>MN_ORA, <>MN_ASL, <>MN_ORA    ; 0x
                 .word <>MN_PHP, <>MN_ORA, <>MN_ASL, <>MN_PHD, <>MN_TSB, <>MN_ORA, <>MN_ASL, <>MN_ORA
 
@@ -822,7 +906,7 @@ MNEMONIC_TAB    .word <>MN_BRK, <>MN_ORA, <>MN_COP, <>MN_ORA, <>MN_TSB, <>MN_ORA
                 .word <>MN_PHA, <>MN_EOR, <>MN_LSR, <>MN_PHK, <>MN_JMP, <>MN_EOR, <>MN_LSR, <>MN_EOR
 
                 .word <>MN_BVC, <>MN_EOR, <>MN_EOR, <>MN_EOR, <>MN_MVN, <>MN_EOR, <>MN_LSR, <>MN_EOR    ; 5x
-                .word <>MN_CLI, <>MN_EOR, <>MN_PHY, <>MN_TCD, <>MN_JMP, <>MN_EOR, <>MN_LSR, <>MN_EOR
+                .word <>MN_CLI, <>MN_EOR, <>MN_PHY, <>MN_TCD, <>MN_JML, <>MN_EOR, <>MN_LSR, <>MN_EOR
 
                 .word <>MN_RTS, <>MN_ADC, <>MN_PER, <>MN_ADC, <>MN_STZ, <>MN_ADC, <>MN_ROR, <>MN_ADC    ; 6x
                 .word <>MN_PLA, <>MN_ADC, <>MN_ROR, <>MN_RTL, <>MN_JMP, <>MN_ADC, <>MN_ROR, <>MN_ADC
@@ -854,24 +938,26 @@ MNEMONIC_TAB    .word <>MN_BRK, <>MN_ORA, <>MN_COP, <>MN_ORA, <>MN_TSB, <>MN_ORA
                 .word <>MN_BEQ, <>MN_SBC, <>MN_SBC, <>MN_SBC, <>MN_PEA, <>MN_SBC, <>MN_INC, <>MN_SBC    ; Fx
                 .word <>MN_SED, <>MN_SBC, <>MN_PLX, <>MN_XCE, <>MN_JSR, <>MN_SBC, <>MN_INC, <>MN_SBC
                 
-                ; A table of all 256 possible instruction slots, listing their addressing modes
+;
+; Map each opcode to its addressing mode
+;
 ADDRESS_TAB     .byte ADDR_IMPLIED, ADDR_DP_IND_X, ADDR_IMM, ADDR_SP_R                  ; 0x
-                .byte ADDR_DP, ADDR_DP, ADDR_DP, ADDR_DP_IND
+                .byte ADDR_DP, ADDR_DP, ADDR_DP, ADDR_DP_LONG
                 .byte ADDR_IMPLIED, ADDR_IMM | OP_M_EFFECT, ADDR_ACC, ADDR_IMPLIED
                 .byte ADDR_ABS, ADDR_ABS, ADDR_ABS, ADDR_ABS_LONG
 
                 .byte ADDR_PC_REL, ADDR_DP_IND_Y, ADDR_DP_IND, ADDR_SP_R_Y              ; 1x
-                .byte ADDR_DP, ADDR_DP_X, ADDR_DP_X, ADDR_DP_IND_Y
+                .byte ADDR_DP, ADDR_DP_X, ADDR_DP_X, ADDR_DP_Y_LONG
                 .byte ADDR_IMPLIED, ADDR_ABS_Y, ADDR_ACC, ADDR_IMPLIED
                 .byte ADDR_ABS, ADDR_ABS_X, ADDR_ABS_X, ADDR_ABS_X_LONG
 
                 .byte ADDR_ABS, ADDR_DP_IND_X, ADDR_ABS_LONG, ADDR_SP_R                 ; 2x
-                .byte ADDR_DP, ADDR_DP, ADDR_DP, ADDR_DP_IND
+                .byte ADDR_DP, ADDR_DP, ADDR_DP, ADDR_DP_LONG
                 .byte ADDR_IMPLIED, ADDR_IMM | OP_M_EFFECT, ADDR_ACC, ADDR_IMPLIED
                 .byte ADDR_ABS, ADDR_ABS, ADDR_ABS, ADDR_ABS_LONG
 
                 .byte ADDR_PC_REL, ADDR_DP_IND_Y, ADDR_DP_IND, ADDR_SP_R_Y              ; 3x
-                .byte ADDR_DP_X, ADDR_DP_X, ADDR_DP_X, ADDR_DP_IND_Y
+                .byte ADDR_DP_X, ADDR_DP_X, ADDR_DP_X, ADDR_DP_Y_LONG
                 .byte ADDR_IMPLIED, ADDR_ABS_Y, ADDR_ACC, ADDR_IMPLIED
                 .byte ADDR_ABS_X, ADDR_ABS_X, ADDR_ABS_X, ADDR_ABS_X_LONG
 
@@ -881,22 +967,22 @@ ADDRESS_TAB     .byte ADDR_IMPLIED, ADDR_DP_IND_X, ADDR_IMM, ADDR_SP_R          
                 .byte ADDR_ABS, ADDR_ABS, ADDR_ABS, ADDR_ABS_LONG
 
                 .byte ADDR_PC_REL, ADDR_DP_IND_Y, ADDR_DP_IND, ADDR_SP_R_Y              ; 5x
-                .byte ADDR_XYC, ADDR_DP_X, ADDR_DP_X, ADDR_DP_IND_Y
+                .byte ADDR_XYC, ADDR_DP_X, ADDR_DP_X, ADDR_DP_Y_LONG
                 .byte ADDR_IMPLIED, ADDR_ABS_Y, ADDR_IMPLIED, ADDR_IMPLIED
-                .byte ADDR_ABS_Y, ADDR_IMPLIED, ADDR_IMPLIED, ADDR_ABS_LONG
+                .byte ADDR_ABS_LONG, ADDR_ABS_X, ADDR_ABS_X, ADDR_ABS_LONG
 
                 .byte ADDR_IMPLIED, ADDR_DP_IND_X, ADDR_PC_REL_LONG, ADDR_SP_R          ; 6x
-                .byte ADDR_DP, ADDR_DP, ADDR_DP, ADDR_DP_IND
+                .byte ADDR_DP, ADDR_DP, ADDR_DP, ADDR_DP_LONG
                 .byte ADDR_IMPLIED, ADDR_IMM | OP_M_EFFECT, ADDR_ACC, ADDR_IMPLIED
                 .byte ADDR_ABS_IND, ADDR_ABS, ADDR_ABS, ADDR_ABS_LONG
 
-                .byte ADDR_IMPLIED, ADDR_DP_IND_Y, ADDR_DP_IND, ADDR_SP_R_Y             ; 7x
-                .byte ADDR_DP_X, ADDR_DP_X, ADDR_DP_X, ADDR_DP_IND_Y
+                .byte ADDR_PC_REL, ADDR_DP_IND_Y, ADDR_DP_IND, ADDR_SP_R_Y              ; 7x
+                .byte ADDR_DP_X, ADDR_DP_X, ADDR_DP_X, ADDR_DP_Y_LONG
                 .byte ADDR_IMPLIED, ADDR_ABS_Y, ADDR_IMPLIED, ADDR_IMPLIED
                 .byte ADDR_ABS_X_ID, ADDR_ABS_X, ADDR_ABS_X, ADDR_ABS_X_LONG
 
                 .byte ADDR_PC_REL, ADDR_DP_IND_X, ADDR_PC_REL_LONG, ADDR_SP_R           ; 8x
-                .byte ADDR_DP, ADDR_DP, ADDR_DP, ADDR_DP_IND
+                .byte ADDR_DP, ADDR_DP, ADDR_DP, ADDR_DP_LONG
                 .byte ADDR_IMPLIED, ADDR_IMM | OP_M_EFFECT, ADDR_IMPLIED, ADDR_IMPLIED
                 .byte ADDR_ABS, ADDR_ABS, ADDR_ABS, ADDR_ABS_LONG
 
@@ -905,25 +991,25 @@ ADDRESS_TAB     .byte ADDR_IMPLIED, ADDR_DP_IND_X, ADDR_IMM, ADDR_SP_R          
                 .byte ADDR_IMPLIED, ADDR_ABS_Y, ADDR_IMPLIED, ADDR_IMPLIED
                 .byte ADDR_ABS, ADDR_ABS_X, ADDR_ABS_X, ADDR_ABS_X_LONG
 
-                .byte ADDR_IMM | OP_X_EFFECT, ADDR_DP_IND_X, ADDR_IMM | OP_X_EFFECT, ADDR_SP_R  ; Ax
-                .byte ADDR_DP, ADDR_DP, ADDR_DP, ADDR_DP_IND
+                .byte ADDR_IMM | OP_M_EFFECT, ADDR_DP_IND_X, ADDR_IMM | OP_X_EFFECT, ADDR_SP_R  ; Ax
+                .byte ADDR_DP, ADDR_DP, ADDR_DP, ADDR_DP_LONG
                 .byte ADDR_IMPLIED, ADDR_IMM | OP_M_EFFECT, ADDR_IMPLIED, ADDR_IMPLIED
-                .byte ADDR_ABS, ADDR_ABS_X, ADDR_ABS_X, ADDR_ABS_X_LONG
+                .byte ADDR_ABS, ADDR_ABS, ADDR_ABS, ADDR_ABS_LONG
 
                 .byte ADDR_PC_REL, ADDR_DP_IND_Y, ADDR_DP_IND, ADDR_SP_R_Y              ; Bx
-                .byte ADDR_DP_X, ADDR_DP_X, ADDR_DP_Y, ADDR_DP_IND_Y
+                .byte ADDR_DP_X, ADDR_DP_X, ADDR_DP_Y, ADDR_DP_Y_LONG
                 .byte ADDR_IMPLIED, ADDR_ABS_Y, ADDR_IMPLIED, ADDR_IMPLIED
                 .byte ADDR_ABS_X, ADDR_ABS_X, ADDR_ABS_Y, ADDR_ABS_X_LONG
 
                 .byte ADDR_IMM | OP_X_EFFECT, ADDR_DP_IND_X, ADDR_IMM, ADDR_SP_R        ; Cx
                 .byte ADDR_DP, ADDR_DP, ADDR_DP, ADDR_DP_LONG
-                .byte ADDR_IMPLIED, ADDR_IMM | OP_X_EFFECT, ADDR_IMPLIED, ADDR_IMPLIED
+                .byte ADDR_IMPLIED, ADDR_IMM | OP_M_EFFECT, ADDR_IMPLIED, ADDR_IMPLIED
                 .byte ADDR_ABS, ADDR_ABS, ADDR_ABS, ADDR_ABS_LONG
 
                 .byte ADDR_PC_REL, ADDR_DP_IND_Y, ADDR_DP_IND, ADDR_SP_R_Y              ; Dx
-                .byte ADDR_DP, ADDR_DP_X, ADDR_DP_X, ADDR_DP_IND_Y
+                .byte ADDR_DP, ADDR_DP_X, ADDR_DP_X, ADDR_DP_Y_LONG
                 .byte ADDR_IMPLIED, ADDR_ABS_Y, ADDR_IMPLIED, ADDR_IMPLIED
-                .byte ADDR_ABS_IND, ADDR_ABS_X, ADDR_ABS_X, ADDR_ABS_X_LONG
+                .byte ADDR_ABS_IND_LONG, ADDR_ABS_X, ADDR_ABS_X, ADDR_ABS_X_LONG
 
                 .byte ADDR_IMM | OP_X_EFFECT, ADDR_DP_IND_X, ADDR_IMM, ADDR_SP_R        ; Ex
                 .byte ADDR_DP, ADDR_DP, ADDR_DP, ADDR_DP_IND
@@ -931,7 +1017,7 @@ ADDRESS_TAB     .byte ADDR_IMPLIED, ADDR_DP_IND_X, ADDR_IMM, ADDR_SP_R          
                 .byte ADDR_ABS, ADDR_ABS, ADDR_ABS, ADDR_ABS_LONG
 
                 .byte ADDR_PC_REL, ADDR_DP_IND_Y, ADDR_DP_IND, ADDR_SP_R_Y              ; Fx
-                .byte ADDR_ABS, ADDR_DP_X, ADDR_DP_X, ADDR_DP_IND_Y                     ; TODO: different address mode for PEA?
+                .byte ADDR_ABS, ADDR_DP_X, ADDR_DP_X, ADDR_DP_Y_LONG
                 .byte ADDR_IMPLIED, ADDR_ABS_Y, ADDR_IMPLIED, ADDR_IMPLIED
                 .byte ADDR_ABS_X_ID, ADDR_ABS_X, ADDR_ABS_X, ADDR_ABS_X_LONG
 .dpage 0
