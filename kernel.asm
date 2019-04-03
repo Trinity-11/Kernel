@@ -149,31 +149,38 @@ greet           setdbr `greet_msg       ;Set data bank to ROM
                 JSL IPRINT       ; print the Keybaord Init Message
 
                 ;
-                ; Test the disassembler
+                ; Test the assembler
                 ;
-                setal
-                LDA #<>SAMPLE
-                STA MARG1
-                setas
-                LDA #`SAMPLE
-                STA MARG1+2
+
 
                 setal
-                LDA #<>SAMPLE + 32
-                STA MARG2
+                LDA #$55AA        ; Store 55AA at 0A0000
+                STA $0A0000
+
+                setal
+                LDA #$0000        ; MCMP_TEXT := 0A0000
+                STA MCMP_TEXT
+                LDA #$000A
+                STA MCMP_TEXT+2
+
+                setdp <>MCMP_TEXT
                 setas
-                LDA #`SAMPLE
-                STA MARG2+2
+                setxl
 
-                setas
-                LDA #2
-                STA MARG_LEN
+                LDY #1
+PROBLEM         LDA [MCMP_TEXT],Y ; Attempt to load character at 0A0001
+                CMP #$55          ; It _should_ be 55
+                BNE not_match
+                
+                LDA #'Y'          ; So we should print Y
+                JSL IPUTC
 
-                LDA #$00
-                STA @lMCPUSTAT    ; Clear the M and X bits in the assembler's processor status flags
-
-                JSL DISASSEMBLE
 LOCK            JMP LOCK
+
+not_match       LDA #'N'          ; Print N if it's not as expected
+                JSL IPUTC
+                BRA LOCK
+
 
                 ;JSL INITKEYBOARD ;
                 ;JSL ITESTSID

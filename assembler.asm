@@ -30,6 +30,10 @@ MNEMONIC    .macro ; text, type, opcode
             .text \1
             .endm
 
+DEFMODE     .macro ; text, code
+            .text \1, 0, \2
+            .endm
+
 ;
 ; Definitions
 ;
@@ -55,7 +59,7 @@ ADDR_DP_LONG = 10       ; [dd]
 ADDR_ABS_LONG = 11      ; dddddd
 ADDR_SP_R_Y = 12        ; #dd,S,Y
 ADDR_DP_Y_LONG = 13     ; [dd],Y
-ADDR_ABS_X_LONG = 14    ; dddddd,Y
+ADDR_ABS_X_LONG = 14    ; dddddd,X
 ADDR_DP_IND = 15        ; (dd)
 ADDR_ABS_X_ID = 16      ; (dddd,X)
 ADDR_DP_Y = 17          ; dd,Y
@@ -65,9 +69,35 @@ ADDR_XYC = 20           ; #dd, #dd
 ADDR_ABS_IND = 21       ; (dddd)
 ADDR_PC_REL_LONG = 22   ; PC relative ()
 ADDR_ABS_IND_LONG = 23  ; [dddd]
-
 OP_M_EFFECT = $80       ; Flag to indicate instruction is modified by M
 OP_X_EFFECT = $40       ; Flag to indicate instruction is modified by X
+
+; Map address mode syntax patterns to address mode code
+; NOTE: the order is important. When multiple patterns
+; start the same way, list longer patterns first to avoid
+; ambiguity.
+ADDR_PATTERNS   #DEFMODE "A", ADDR_ACC
+                #DEFMODE "dddddd,X", ADDR_ABS_X_LONG
+                #DEFMODE "dddddd", ADDR_ABS_LONG
+                #DEFMODE "dddd,X", ADDR_ABS_X
+                #DEFMODE "dddd,Y", ADDR_ABS_Y
+                #DEFMODE "dddd", ADDR_ABS
+                #DEFMODE "dd,X", ADDR_DP_X
+                #DEFMODE "dd,Y", ADDR_DP_Y
+                #DEFMODE "dd,S", ADDR_SP_R
+                #DEFMODE "dd", ADDR_DP
+                #DEFMODE "#dddd", ADDR_IMM | OP_M_EFFECT | OP_X_EFFECT
+                #DEFMODE "#dd,#dd", ADDR_XYC
+                #DEFMODE "#dd", ADDR_IMM
+                #DEFMODE "(dd,S),Y", ADDR_SP_R_Y
+                #DEFMODE "(dddd,X)", ADDR_ABS_X_ID
+                #DEFMODE "(dddd)", ADDR_ABS_X_ID
+                #DEFMODE "(dd,X)", ADDR_DP_IND_X
+                #DEFMODE "(dd),Y", ADDR_DP_IND_Y
+                #DEFMODE "(dd)", ADDR_DP_IND
+                #DEFMODE "[dddd]", ADDR_ABS_IND_LONG
+                #DEFMODE "[dd],Y", ADDR_DP_Y_LONG
+                #DEFMODE "[dd]", ADDR_DP_LONG
 
 MN_CLASS_00 = 0
 MN_CLASS_01 = 1
@@ -110,6 +140,73 @@ SAMPLE          .as
                 BRK
                 BRK
                 BRK
+
+;
+; Compare two NUL terminated ASCII strings for a pattern match.
+;
+; String to compare must be an exact match to the pattern with
+; one exception: a "d" in the pattern will match any hexadecimal
+; digit (0 - 9, A - F)
+;
+; Inputs:
+;   MARG2 : the string to check against the pattern
+;   MCMP_TEXT : the pattern to check
+;
+; Outputs:
+;   C bit set if string matches the pattern, clear otherwise
+;
+AS_STR_MATCH    .proc
+                PHP
+                PHD
+
+                setdp <>MCMP_TEXT
+
+                setas
+                setxl
+                LDY #0
+
+match_loop      LDA [MCMP_TEXT],Y   ; Get the pattern character
+                BEQ nul_check       ; If at end of pattern, check for end of test string
+                CMP #'d'            ; Is it a digit?
+                BEQ check_digit     ; Yes: do special check for hex digit
+
+                CMP [MARG2],Y       ; Does it match the character to test?
+                BNE return_false    ; No: return fail
+
+                INY                 ; Yes: test the next character
+                BRA match_loop
+
+nul_check       LDA [MARG2],Y       ; Check to see that we're at the end of the test string
+                BNE return_false    ; If not: return false
+
+return_true     PLD
+                PLP                 ; Return true
+                SEC
+                RTL
+
+return_false    PLD
+                PLP                 ; Return false
+                CLC
+                RTL
+
+                ; Check to see if the test character matches a hex digit
+check_digit     LDA [MARG2],Y
+                CMP #'9'+1
+                BCS check_AF
+                CMP #'0'
+                BCS match_loop      ; character is in [0..9]
+
+check_AF        CMP #'F'+1
+                BCS check_lc        ; check lower case
+                CMP #'A'
+                BCS match_loop      ; character is in [A..F]
+
+check_lc        CMP #'f'+1
+                BCS check_lc        ; check lower case
+                CMP #'a'
+                BCS match_loop      ; character is in [A..F] 
+                BRA return_false    ; No match found... return false
+                .pend
 
 ;
 ; Disassemble a block of memeory
