@@ -15,6 +15,8 @@
 .include "monitor.asm"
 .include "SDOS.asm"
 .include "OPL2_Library.asm"
+.include "Floppy.asm"
+.include "FAT12.asm"
 ; C256 Foenix / Nu64 Kernel
 ; Loads to $F0:0000
 
@@ -98,13 +100,13 @@ CLEAR_MEM_LOOP
 ;                STA SDCARD_CMD;
                 setaxl
                 ; Initialize Super IO Chip
-                JSL INITCODEC
+                ;JSL INITCODEC
                 ;LDA SDCARD_DATA;
 
-                JSL INITSUPERIO
+                ;JSL INITSUPERIO
 
                 ; Init the RTC (Test the Interface)
-                JSL INITRTC
+                ;JSL INITRTC
                 ; INIT The FONT Memory
 
                 ; Init Globacl Look-up Table
@@ -138,6 +140,80 @@ greet           setdbr `greet_msg       ;Set data bank to ROM
                  ; Let's Change the Color Memory For the Logo
                 LDX #<>version_msg
                 JSL IPRINT       ; print the first line
+
+
+                ;---------------------------------------------------------------
+                ; FAT 12 test code START
+                setaxl
+                LDA #`file_to_load ; load the byte nb 3 (bank byte)
+                PHA
+                LDA #<>file_to_load ; load the low world part of the buffer address
+                PHA
+                LDA #`FAT12_ADDRESS_BUFFER_512 ; load the byte nb 3 (bank byte)
+                PHA
+                LDA #<>FAT12_ADDRESS_BUFFER_512 ; load the low world part of the buffer address
+                PHA
+                ;JSL ILOAD_FILE
+
+
+                JSL IFAT12_READ_BOOT_SECTOR
+                CMP #$0001
+                BEQ FAT_12_BOOT_SECTOR_PARSING_OK
+                LDX #<>error_FAT
+                JSL IPRINT       ; print the first line
+
+FAT_12_BOOT_SECTOR_PARSING_OK
+                ;LDX #<>text_BOOT_SECTOR_PARSING_OK
+                ;JSL IPRINT       ; print the first line
+                JSL IFAT12_GET_ROOT_DIR_POS
+                setaxl
+                LDA #$00 ; sellect the first entry
+                PHA
+FDD_DISPLAY_NEXT_ROOT_ENTRY
+                JSL IFAT12_GET_ROOT_ENTRY
+                setdbr `Root_entry_value
+                LDX #<>Root_entry_value
+                JSL IPRINT       ; print the first line
+                setaxl
+                PLA
+                CMP #20 ;Max_Root_Entry ; limit jusy how many enty is displayed
+                BEQ FDD_END_DISPLAY_ROOT_ENTRY_LOOP
+                INC A
+                PHA
+
+                BRA FDD_DISPLAY_NEXT_ROOT_ENTRY
+FDD_END_DISPLAY_ROOT_ENTRY_LOOP
+                PLA
+                LDA #0 ; read fthe first root entry
+                JSL IFAT12_GET_ROOT_ENTRY
+                BRA FIRST_ROOT_ENTRY_READ
+READ_NEXT_FILE
+
+FIRST_ROOT_ENTRY_READ
+                LDA Root_entry_value + 26 ; get the first fat entry for the fil from the root directory entry 0
+                ;ADC #1+9+9+14 ; skip the reserved sector ,  the 2 fat and the root sector
+                STA Fat12_next_entry
+
+Read_next_sector; read sector function to call there
+                LDA #`FAT12_ADDRESS_BUFFER_512 ; load the byte nb 3 (bank byte)
+                PHA
+                LDA #<>FAT12_ADDRESS_BUFFER_512 ; load the low world part of the buffer address
+                PHA
+                LDA Fat12_next_entry ; sector to read
+                ADC #1+9+9+14
+                JSL IFDD_READ
+                PLX
+                PLX
+                LDA Fat12_next_entry ; sector to read
+                JSL IFAT_GET_FAT_ENTRY
+                LDA Fat12_next_entry
+                CMP #$FFE
+                BCS READ_NEXT_FILE
+                BRA Read_next_sector
+end_loop        BRA end_loop
+
+                ; FAT 12 test code END
+                ;---------------------------------------------------------------
                 LDX #<>init_rtc_msg
                 JSL IPRINT       ; print the RTC Init Message
                 LDX #<>init_lpc_msg
@@ -1979,7 +2055,7 @@ IRQ_HANDLER
                 ; This is very temporary, in reality this is Where
                 ; there should be some parsing to know which Interrupt is Active
                 ; And process it accordingly
-                ; Clear Any pending Interrupt of Block0                
+                ; Clear Any pending Interrupt of Block0
                 LDA @lINT_PENDING_REG0 ; Clear the Pending INTERRUPT
                 STA @lINT_PENDING_REG0 ; Clear the Pending INTERRUPT
                 ; Clear Any pending Interrupt of Block1
@@ -2215,6 +2291,8 @@ hello_ml        .null "G 020000",$0D
                 .null ";002112 0019 F0AA 0000 D6FF F8  0000 --M-----"
 error_01        .null "ABORT ERROR"
 hex_digits      .text "0123456789ABCDEF",0
+error_FAT       .null "Error in the floppy boot sector, wrong data",$0D
+file_to_load    .text "MSDOS   SYS"
 
 ;                           $00, $01, $02, $03, $04, $05, $06, $07, $08, $09, $0A, $0B, $0C, $0D, $0E, $0F
 ScanCode_Press_Set1   .text $00, $1B, $31, $32, $33, $34, $35, $36, $37, $38, $39, $30, $2D, $3D, $08, $09    ; $00
