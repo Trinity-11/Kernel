@@ -173,6 +173,10 @@ MARG_LEN         = $000291 ;1 Byte count of the number of arguments passed
 MCOUNT           = $000292 ;2 Byte counter
 MTEMP            = $000294 ;4 Bytes of temporary space
 MCPUSTAT         = $000299 ;1 Byte to represent what the disassembler thinks the processor MX bits are
+MPARSEDNUM       = $00029A ;4 Bytes to store a parsed number
+MMNEMONIC        = $00029E ;2 Byte address of mnemonic found by the assembler
+MADDR_MODE       = $0002A0 ;1 Byte address mode found by the assembler
+MTEMPPTR         = $0002A1 ;4 Byte temporary pointer
 
 LOADFILE_VARS    = $000300 ; Byte
 LOADFILE_NAME    = $000300 ;3 Bytes (addr) Name of file to load. Address in Data Page

@@ -148,40 +148,6 @@ greet           setdbr `greet_msg       ;Set data bank to ROM
                 LDX #<>init_kbrd_msg
                 JSL IPRINT       ; print the Keybaord Init Message
 
-                ;
-                ; Test the assembler
-                ;
-
-
-                setal
-                LDA #$55AA        ; Store 55AA at 0A0000
-                STA $0A0000
-
-                setal
-                LDA #$0000        ; MCMP_TEXT := 0A0000
-                STA MCMP_TEXT
-                LDA #$000A
-                STA MCMP_TEXT+2
-
-                setdp <>MCMP_TEXT
-                setas
-                setxl
-
-                LDY #1
-PROBLEM         LDA [MCMP_TEXT],Y ; Attempt to load character at 0A0001
-                CMP #$55          ; It _should_ be 55
-                BNE not_match
-                
-                LDA #'Y'          ; So we should print Y
-                JSL IPUTC
-
-LOCK            JMP LOCK
-
-not_match       LDA #'N'          ; Print N if it's not as expected
-                JSL IPUTC
-                BRA LOCK
-
-
                 ;JSL INITKEYBOARD ;
                 ;JSL ITESTSID
 

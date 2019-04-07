@@ -524,15 +524,7 @@ prhex_loop      setas
                 JSL IPRINTH             ; And print it
                 PLB
 
-                setal                   ; Point MCURSOR to the next byte
-                CLC
-                LDA MCURSOR
-                ADC #1
-                STA MCURSOR
-                setas
-                LDA MCURSOR+2
-                ADC #0
-                STA MCURSOR+2
+                JSL M_INC_CURSOR        ; Point MCURSOR to the next byte
 
                 ; Check to see if we need a new line
 check_line      setas
@@ -571,6 +563,65 @@ continue        JMP dump_line
                 .pend
 
 .include "assembler.asm"
+
+;
+; Utility subroutines
+;
+
+;
+; Increment the monitor's memory cursor
+;
+M_INC_CURSOR    .proc
+                PHP
+                setal
+                PHA
+
+                CLC
+                LDA MCURSOR
+                ADC #1
+                STA MCURSOR
+                setas
+                LDA MCURSOR+2
+                ADC #0
+                STA MCURSOR+2
+
+                setal
+                PLA
+                PLP
+                RTL
+                .pend
+
+;
+; Given a NUL terminated ASCII string, convert all lower-case letters to upper case
+;
+; Inputs:
+;   X = pointer to the NUL terminated ASCII string
+;   DBR = bank containing the string
+;
+M_TO_UPPER      .proc
+                PHP
+                setxl
+                PHX
+
+                setas
+loop            LDA #0,B,X
+                BEQ done
+
+                CMP #'z'+1
+                BCS try_next
+                CMP #'a'
+                BCC try_next
+
+                AND #%11011111
+                STA #0,B,X
+
+try_next        INX
+                BRA loop
+
+done            PLX
+                PLP
+                RTL
+                .pend
                 
 
 ;
@@ -581,10 +632,8 @@ IMRETURN        RTL ; Handle RETURN key (ie: execute command)
 IMPARSE         BRK ; Parse the current command line
 IMPARSE1        BRK ; Parse one word on the current command line
 IMEXECUTE       BRK ; Execute the current command line (requires MCMD and MARG1-MARG8 to be populated)
-IMASSEMBLE      BRK ; Assemble a line of text.
 IMASSEMBLEA     BRK ; Assemble a line of text.
 IMCOMPARE       BRK ; Compare memory. len=1
-IMDISASSEMBLE   BRK ; Disassemble memory. end=1 instruction
 IMGO            BRK ; Execute from specified address
 IMJUMP          BRK ; Execute from spefified address
 IMHUNT          BRK ; Hunt (find) value in memory

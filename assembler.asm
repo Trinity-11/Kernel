@@ -1,23 +1,6 @@
 ;;;
-;;; Disassembler portion of monitor
+;;; Assembler/Disassembler portion of monitor
 ;;;
-
-;
-; Disassembler theory of operation:
-; DS_PR_LINE disassembles a line of machine code at MCURSOR
-; For any given opcode XX, it will look up a pointer to the mnemonic in MNEMONIC_TAB
-; and the addressing mode code in ADDRESS_TAB. The mnemonic will be printed by
-; DS_PR_MNEMONIC, and the operand by DS_PR_OPERAND (which uses the addressing mode
-; to determine how to print the operand and how many bytes are in the operand).
-;
-; DS_PR_LINE will also track the current values of the M and X bits from the status
-; register by taking REP and SEP instruction into account. These bits will be used
-; to determine operand size for certain immediate addressing cases. This method will
-; not be perfect, and the user will be expected to over-ride the values of M and X
-; when starting the disassembler.
-;
-
-; TODO: provide a means to over-ride the MX bits in MCPUSTAT
 
 ;
 ; Macros
@@ -27,11 +10,12 @@
 ; Originally, it was going to take a type and basic opcode to help in assembly
 ; but I now think that's nonsense.
 MNEMONIC    .macro ; text, type, opcode
-            .text \1
+            .null \1
             .endm
 
 DEFMODE     .macro ; text, code
-            .text \1, 0, \2
+            .null \1
+            .byte \2
             .endm
 
 ;
@@ -72,74 +56,432 @@ ADDR_ABS_IND_LONG = 23  ; [dddd]
 OP_M_EFFECT = $80       ; Flag to indicate instruction is modified by M
 OP_X_EFFECT = $40       ; Flag to indicate instruction is modified by X
 
-; Map address mode syntax patterns to address mode code
-; NOTE: the order is important. When multiple patterns
-; start the same way, list longer patterns first to avoid
-; ambiguity.
-ADDR_PATTERNS   #DEFMODE "A", ADDR_ACC
-                #DEFMODE "dddddd,X", ADDR_ABS_X_LONG
-                #DEFMODE "dddddd", ADDR_ABS_LONG
-                #DEFMODE "dddd,X", ADDR_ABS_X
-                #DEFMODE "dddd,Y", ADDR_ABS_Y
-                #DEFMODE "dddd", ADDR_ABS
-                #DEFMODE "dd,X", ADDR_DP_X
-                #DEFMODE "dd,Y", ADDR_DP_Y
-                #DEFMODE "dd,S", ADDR_SP_R
-                #DEFMODE "dd", ADDR_DP
-                #DEFMODE "#dddd", ADDR_IMM | OP_M_EFFECT | OP_X_EFFECT
-                #DEFMODE "#dd,#dd", ADDR_XYC
-                #DEFMODE "#dd", ADDR_IMM
-                #DEFMODE "(dd,S),Y", ADDR_SP_R_Y
-                #DEFMODE "(dddd,X)", ADDR_ABS_X_ID
-                #DEFMODE "(dddd)", ADDR_ABS_X_ID
-                #DEFMODE "(dd,X)", ADDR_DP_IND_X
-                #DEFMODE "(dd),Y", ADDR_DP_IND_Y
-                #DEFMODE "(dd)", ADDR_DP_IND
-                #DEFMODE "[dddd]", ADDR_ABS_IND_LONG
-                #DEFMODE "[dd],Y", ADDR_DP_Y_LONG
-                #DEFMODE "[dd]", ADDR_DP_LONG
-
-MN_CLASS_00 = 0
-MN_CLASS_01 = 1
-MN_CLASS_10 = 2
-MN_CLASS_11 = 3
-MN_CLASS_IRR = 4
-MN_CLASS_SB = 5
-MN_CLASS_BR = 6
-
 ;
-; Testing Notes:
-;   30/3/2019 -- PJW -- Verified: single byte instructions, branches, JMP, JML, JSR, and JSL.
-;   31/3/2019 -- PJW -- Verified: ADC, SBC, CPx, INx, AND, EOR, ORA, BIT, TRB, TSB
-;                       ASL, LSR, ROL, ROR, BRK, COP, MVN, MVP, NOP, PEA, PEI, PER
-;                       LDA, LDX, LDY, STA, STX, STY
+; Assembler theory of operation
 ;
-; TODO: REP/SEP and M/X bit interactions
+; The assembler expects that the separate words of the assemble command have already been parsed out
+; The address to assemble to goes in MARG1
+; The address of a NUL-terminated ASCII string for the mnemonic is in MARG2
+; The address of a NUL-terminated ASCII string for the operand is in MARG3
+;
+; The assembler will search for the mnemonic in the mnemonic table.
+; It will then try to do a simple pattern match of the operand against each of the address mode
+; patterns until it finds a match. At that time, any hexadecimal digits in the operand are converted
+; from ASCII to an actual number.
+; The assembler then scans the table MNEMONIC_TAB for instances of the mnemonic found above. When it finds
+; a match, it checks the correspondinging entry in ADDRESS_TAB to see if it matches the desired addressing more.
+; If so, the index into ADDRESS_TAB is the opcode to write to memory. If not, the assembler keeps searching.
+; If an opcode is found, the opcode is written to memory, as are te operand bytes (if any).
 ;
 
 ;
-; Disassembler code
+; Assemble an instruction, given the address, mnemonic, and operand fields
 ;
+; Inputs:
+;   MARG1 = address of instruction
+;   MARG2 = pointer to NUL terminated string containing the mnemonic to assemble
+;   MARG3 = pointer to NUL terminated string for the operand (if any)
+;
+IMASSEMBLE      .proc
+                PHP
+                PHB
+                PHD
 
-; TODO: remove the sample code block     
-SAMPLE          .as
-                .xs
-                SEP #$30
-                LDA #$12
-                LDX #$34
-                .al
-                .xl
-                REP #$30
-                LDA #$5678
-                LDX #$789A
-                .as
-                .xs
-                SEP #$30
-                LDA #$BC
-                LDX #$DE
-                BRK
-                BRK
-                BRK
+                setdp <>MONITOR_VARS
+
+                PHB
+                setas
+                LDA MARG2+2             ; Convert MARG2 (mnemonic) to upper case
+                PHA
+                PLB        
+                setaxl
+                LDX MARG2
+                JSL M_TO_UPPER
+
+                setas
+                LDA MARG3+2             ; Convert MARG3 (operand) to upper case
+                PHA
+                PLB  
+                setaxl
+                LDX MARG3
+                JSL M_TO_UPPER 
+                PLB       
+
+                setal
+                LDA MARG1               ; Set the monitor cursor to the address
+                STA MCURSOR
+                LDA MARG1+2
+                STA MCURSOR+2
+
+                setal
+                JSL AS_FIND_MNEMO       ; Find the address of the mnemonic
+                CMP #$FFFF
+                BEQ bad_mnemonic        ; If not found, print bad mnemonic error message
+                STA MMNEMONIC
+
+                setas
+                LDA MARG_LEN            ; Check the number of arguments passed
+                CMP #3                  ; Were all three arguments provided?
+                BEQ get_operand         ; Yes: parse the operand
+
+                LDA #ADDR_IMPLIED       ; No: assume address mode is implied
+                STA MADDR_MODE
+                BRA get_opcode
+
+bad_mnemonic    JSL IPRINTCR            ; Print the "bad mnemonic" error message
+                setdbr `MERRBADMNEMO
+                setxl
+                LDX #<>MERRBADMNEMO
+                JSL IPUTS
+                JMP done
+
+bad_operand     JSL IPRINTCR            ; Print the "bad operand" error message
+                setdbr `MERRBADOPER
+                setxl
+                LDX #<>MERRBADOPER
+                JSL IPUTS
+                JMP done
+
+get_operand     setas
+                JSL AS_FIND_MODE        ; Find the addressing mode of the operand
+compare         CMP #$FF
+                BEQ bad_operand         ; If not found, print bad operand error message
+                STA MADDR_MODE
+                
+                CMP #ADDR_ABS           ; If mode is absolute or absolute long...
+                BEQ check_for_pcrel     ; Check to see if the mnemonic is one of the branches
+                CMP #ADDR_ABS_LONG
+                BEQ check_for_pcrel                
+                CMP #ADDR_IMPLIED       ; If mode is implied or accumulator, get the opcode
+                BEQ get_opcode
+                CMP #ADDR_ACC
+                BEQ get_opcode
+
+get_opcode      JSL AS_FIND_OPCODE      ; Find the opcode matching the two
+                BCS save_opcode            
+                JMP bad_mode            ; If opcode not found, print bad address mode error message
+
+save_opcode     STA [MCURSOR]           ; Write the opcode to the address
+                JSL M_INC_CURSOR        ; And point to the next byte
+
+                setdbr 0                ; Go back to bank 0
+
+                setal
+                LDA MCURSOR             ; Make MTEMPPTR a pointer to the machine code we're assembling
+                STA MTEMPPTR
+                LDA MCURSOR+2
+                STA MTEMPPTR+2
+
+                setas
+                LDA MADDR_MODE          ; Check the address mode again
+                CMP #ADDR_PC_REL        ; If it's PC relative
+                BEQ compute_rel         ; Convert the address to an offset
+                CMP #ADDR_PC_REL_LONG
+                BEQ compute_rel
+                CMP #ADDR_XYC           ; MVP/MVN addressing mode?
+                BEQ emit_2
+
+                setal
+                AND #$00FF
+                TAX
+                setas
+get_length      LDA ADDR_LENGTH,X       ; Get the number of bytes in the addressing mode
+                CMP #$03
+                BEQ emit_3
+                CMP #$02
+                BEQ emit_2
+                CMP #$01
+                BEQ emit_1
+                BRA next_line
+
+check_for_pcrel setal
+                LDA MMNEMONIC
+                CMP #<>MN_BRA
+                BEQ is_pcrel
+                CMP #<>MN_BRL
+                BEQ is_pcrel_long
+                CMP #<>MN_BCC
+                BEQ is_pcrel
+                CMP #<>MN_BCS
+                BEQ is_pcrel
+                CMP #<>MN_BEQ
+                BEQ is_pcrel
+                CMP #<>MN_BMI
+                BEQ is_pcrel
+                CMP #<>MN_BNE
+                BEQ is_pcrel
+                CMP #<>MN_BPL
+                BEQ is_pcrel
+                BRA get_opcode
+
+is_pcrel        setas
+                LDA #ADDR_PC_REL
+                STA MADDR_MODE
+                JMP get_opcode
+
+is_pcrel_long   setas
+                LDA #ADDR_PC_REL_LONG
+                STA MADDR_MODE
+                JMP get_opcode
+
+                ; Handle PC relative addresses
+compute_rel     JSL AS_PC_OFFSET        ; Try to compute the offset
+                BCC bad_offset          ; If failed, it's a bad offset operand
+
+emit_rel        CMP #$02                ; If the offset is two bytes
+                BEQ emit_2              ; Emit those two bytes
+                BRA emit_1              ; Otherwise emit just the one
+
+emit_3          LDY #2                  ; Write bank byte of operand
+                LDA MPARSEDNUM,Y
+                STA [MTEMPPTR],Y
+                JSL M_INC_CURSOR
+
+emit_2          LDY #1                  ; Write high byte of operand
+                LDA MPARSEDNUM,Y
+                STA [MTEMPPTR],Y
+                JSL M_INC_CURSOR
+
+emit_1          LDY #0                  ; Write low byte of operand
+                LDA MPARSEDNUM,Y
+                STA [MTEMPPTR],Y
+                JSL M_INC_CURSOR
+
+                ; Print "A bb:hhll "
+next_line       setas
+                JSL IPRINTCR
+                LDA #'A'
+                JSL IPUTC
+                LDA #' '
+                JSL IPUTC
+
+                LDX MCURSOR
+                STX MTEMP
+                LDX MCURSOR+2
+                STX MTEMP+2
+                JSL M_PR_ADDR
+
+                LDA #' '
+                JSL IPUTC
+
+                BRA done
+
+bad_mode        JSL IPRINTCR            ; Print the "bad addressing mode" error message
+                setdbr `MERRBADMODE
+                setxl
+                LDX #<>MERRBADMODE
+                JSL IPUTS
+                BRA done
+
+bad_offset      JSL IPRINTCR            ; Print the "bad offset" error message
+                setdbr `MERRBADOFFSET
+                setxl
+                LDX #<>MERRBADOFFSET
+                JSL IPUTS
+                BRA done
+
+done            PLD
+                PLB
+                PLP
+                RTL
+                .pend
+
+MERRBADMODE     .null "Addressing mode not defined for that instruction."
+MERRBADMNEMO    .null "Bad mnemonic."
+MERRBADOPER     .null "Bad operand."
+MERRBADOFFSET   .null "Relative offset is too large."
+
+;
+; Convert an absolute address to a PC-relative address
+;
+; Inputs:
+;   MADDR_MODE = address mode
+;   MPARSEDNUM = address to convert
+;   MCURSOR = PC to serve as base of conversion
+;
+; Returns:
+;   MPARSEDNUM = offset
+;   A = number of bytes in offset (1, or 2)
+;   C = set on failure (offset too large), clear otherwise
+;
+AS_PC_OFFSET    .proc
+                PHP
+                PHD
+
+                setdp <>MONITOR_VARS
+
+                setas
+                LDA MADDR_MODE          ; Check to see if it 1 byte or 2 byte relative
+                CMP #ADDR_PC_REL
+                BEQ is_short
+
+                setal
+                CLC                     ; Branch is long. Compute where MCURSOR will be
+                LDA MCURSOR             ; with two branch offset bytes
+                ADC #2
+                BRA compute_cursor
+
+is_short        setal
+                CLC                     ; Branch is short. Computer where MCURSOR will be
+                LDA MCURSOR             ; with one branch offset byte
+                ADC #1
+compute_cursor  STA MTEMP
+                LDA MCURSOR+2
+                ADC #0
+                STA MTEMP+2
+
+                SEC                     ; MPARSEDNUM = MPARSEDNUM - MTEMP (MCURSOR after the instruction)
+                LDA MPARSEDNUM
+                SBC MTEMP
+                STA MPARSEDNUM
+                LDA MPARSEDNUM+2
+                SBC MTEMP+2
+                STA MPARSEDNUM+2
+
+                ; Check to see if offset is too big
+                setas
+                LDA MADDR_MODE
+                CMP #ADDR_PC_REL_LONG
+                BEQ check_long
+
+                LDA MPARSEDNUM          ; Short offset... check if it's negative
+                BMI check_short_neg
+
+                LDA MPARSEDNUM+1        ; Positive short offset... upper two bytes
+                BNE failure             ; Must be 0 or it's an overflow
+                LDA MPARSEDNUM+2
+                BNE failure
+
+                LDA #1                  ; Short offset is 1 byte
+                BRA success
+
+check_short_neg LDA MPARSEDNUM+1        ; Negative short offset... upper two bytes
+                CMP #$FF                ; Must be $FF or it's an  overflow
+                BNE failure             
+                LDA MPARSEDNUM+2
+                CMP #$FF
+                BNE failure
+                BRA success
+
+check_long      LDA MPARSEDNUM+1        ; Long offset... check if it's negative
+                BMI check_long_neg
+
+                LDA MPARSEDNUM+2        ; Positive long offset... upper byte
+                BNE failure             ; Must be 0 or it's an overflow
+                BRA success
+
+check_long_neg  LDA MPARSEDNUM+2        ; Negative offset... upper two bytes
+                CMP #$FF                ; Must be $FF or it's and overflow
+                BNE failure
+
+                LDA #2                  ; Long offset is 2 bytes             
+                BRA success
+
+failure         PLD
+                PLP
+                CLC
+                RTL
+
+
+success         PLD
+                PLP
+                SEC
+                RTL
+                .pend
+
+;
+; Shift the hex digit in A (as an ASCII character) onto the
+; hexadecimal number in MPARSEDNUM.
+;
+; Inputs:
+;   A = an ASCII character for a hex digit
+;
+AS_SHIFT_HEX    .proc
+                PHP
+                PHD
+                setxl
+                PHX
+
+                setdp <>MONITOR_VARS
+
+                setas
+                
+                LDX #0
+seek_loop       CMP @lhex_digits,X  ; Check the passed character against the hex digits
+                BEQ found
+
+                INX                 ; Go to the next hex digit
+                CPX #$10            ; Are we out of digits?
+                BEQ done            ; Yes... just return
+                BRA seek_loop
+
+found           setal               ; X = the value of the hex digit
+                .rept 4             ; Shift MPARSEDNUM left one hex digit
+                ASL MPARSEDNUM
+                ROL MPARSEDNUM+2
+                .next
+
+                setas               ; And add the X to the shifted MPARSEDNUM
+                TXA
+                ORA MPARSEDNUM
+                STA MPARSEDNUM
+
+done            PLX
+                PLD
+                PLP
+                RTL
+                .pend
+
+;
+; Find the opcode for a combination of mnemonic and addressing mode
+;
+; Inputs:
+;   MMNEMONIC = address of the mnemonic
+;   MADDR_MODE = address mode byte
+;
+; Outputs:
+;   A = opcode, if found
+;   C is set if opcode found, clear if not found
+;   P is changed (M set, X clear)
+;
+AS_FIND_OPCODE  .proc
+                PHD
+                PHB
+                setdp <>MONITOR_VARS
+                setdbr `MNEMONIC_TAB
+
+                setaxl
+                LDX #0
+                LDY #0
+
+mnemonic_loop   LDA MNEMONIC_TAB,X      ; Get the mnemonic from the opcode table
+                BEQ not_found           ; If it's 0, we did not find the mnemonic
+                CMP MMNEMONIC           ; Does it match the passed mnemonic?
+                BNE next_opcode         ; No: go to the next opcode
+
+check_mode      setas                   ; Yes: check to see if the address mode matches
+                LDA ADDRESS_TAB,Y       ; Get the corresponding address mode
+                AND #%00111111          ; Filter out effect bits
+                CMP MADDR_MODE
+                BEQ found               ; Yes: we found the opcode
+                setal
+
+next_opcode     INX                     ; Point to the next mnemonic in the table
+                INX
+                INY
+                BRA mnemonic_loop       ; And check it
+
+found           TYA
+                SEC                     ; Set carry to show success
+                PLB
+                PLD
+                RTL
+
+not_found       CLC                     ; Clear carry to show failure
+                PLB
+                PLD
+                RTL
+                .pend
 
 ;
 ; Compare two NUL terminated ASCII strings for a pattern match.
@@ -149,34 +491,43 @@ SAMPLE          .as
 ; digit (0 - 9, A - F)
 ;
 ; Inputs:
-;   MARG2 : the string to check against the pattern
+;   MLINEBUF : the string to check against the pattern
 ;   MCMP_TEXT : the pattern to check
 ;
 ; Outputs:
 ;   C bit set if string matches the pattern, clear otherwise
+;   MPARSEDNUM = the value of any hex digits that were matched to the pattern
 ;
 AS_STR_MATCH    .proc
                 PHP
                 PHD
 
-                setdp <>MCMP_TEXT
+                setdp <>MONITOR_VARS
 
                 setas
                 setxl
                 LDY #0
+
+                STZ MPARSEDNUM      ; Set parsed number to 0 in anticipation of 
+                STZ MPARSEDNUM+2    ; hex digits in the pattern
 
 match_loop      LDA [MCMP_TEXT],Y   ; Get the pattern character
                 BEQ nul_check       ; If at end of pattern, check for end of test string
                 CMP #'d'            ; Is it a digit?
                 BEQ check_digit     ; Yes: do special check for hex digit
 
-                CMP [MARG2],Y       ; Does it match the character to test?
+compare         PHA
+                LDA [MLINEBUF],Y
+                STA MTEMP
+                PLA
+                
+                CMP MTEMP           ; Does it match the character to test?
                 BNE return_false    ; No: return fail
 
-                INY                 ; Yes: test the next character
+next_char       INY                 ; Yes: test the next character
                 BRA match_loop
 
-nul_check       LDA [MARG2],Y       ; Check to see that we're at the end of the test string
+nul_check       LDA [MLINEBUF],Y    ; Check to see that we're at the end of the test string
                 BNE return_false    ; If not: return false
 
 return_true     PLD
@@ -190,23 +541,201 @@ return_false    PLD
                 RTL
 
                 ; Check to see if the test character matches a hex digit
-check_digit     LDA [MARG2],Y
+check_digit     setas
+                LDA [MLINEBUF],Y
                 CMP #'9'+1
                 BCS check_AF
                 CMP #'0'
-                BCS match_loop      ; character is in [0..9]
+                BCS shift_digit     ; character is in [0..9]
 
 check_AF        CMP #'F'+1
                 BCS check_lc        ; check lower case
                 CMP #'A'
-                BCS match_loop      ; character is in [A..F]
+                BCS shift_digit     ; character is in [A..F]
 
 check_lc        CMP #'f'+1
-                BCS check_lc        ; check lower case
+                BCS return_false    ; check lower case
                 CMP #'a'
-                BCS match_loop      ; character is in [A..F] 
+                BCS to_upcase       ; character is in [A..F] 
                 BRA return_false    ; No match found... return false
+
+to_upcase       AND #%11011111      ; Convert lower case to upper case
+
+shift_digit     JSL AS_SHIFT_HEX    ; Shift the digit into MPARSEDNUM
+                BRA next_char       ; And check the next character
                 .pend
+
+;
+; Advance MCMP_TEXT pointer to the byte after NUL
+;
+; Inputs:
+;   MCMP_TEXT = pointer to advance to the next byte after a NUL
+;
+; Registers Changed
+;   A, Y, P
+;
+AS_MCMP_NEXT    .proc
+                PHD
+
+                setdp <>MONITOR_VARS
+
+                LDY #0
+                setas
+loop            LDA [MCMP_TEXT],Y   ; Check to see if we have gotten to the NUL
+                BEQ found_nul
+
+                INY
+                BRA loop
+
+found_nul       setal
+                INY                 ; Got to NUL... point to next byte
+                PHY
+                PLA                 ; And add that index to MCMP_TEXT pointer
+                CLC
+                ADC MCMP_TEXT
+                STA MCMP_TEXT
+                LDA MCMP_TEXT+2
+                ADC #0
+                STA MCMP_TEXT+2
+
+                PLD
+                RTL
+                .pend
+
+;
+; Find the address of the mnemonic matching the mnemonic field
+;
+; Inputs:
+;   MARG2 = pointer to the mnemonic field (a NUL terminated string)
+;
+; Outputs:
+;   A = pointer to the mnemonic contained in the field ($FFFF if not found)
+;
+; Registers:
+;   A, P
+;
+AS_FIND_MNEMO   .proc
+                PHD
+
+                setdp <>MONITOR_VARS
+
+                setal
+                LDA MARG2                   ; Point MLINEBUF to the text
+                STA MLINEBUF
+                LDA MARG2+2
+                STA MLINEBUF+2
+
+                LDA #<>MNEMONICS_TAB        ; Point to the first mnemonic
+                STA MCMP_TEXT
+                LDA #`MNEMONICS_TAB
+                STA MCMP_TEXT+2
+
+match_loop      JSL AS_STR_MATCH            ; Check to see if the text matches the mnemonic
+                BCS found_mnemonic          ; If so: return that we found it
+
+                JSL AS_MCMP_NEXT            ; Point to the next mnemonic
+
+                LDA [MCMP_TEXT]             ; Check to see if it's NUL
+                BNE match_loop              ; If not, check this next mnemonic
+
+                LDA #$FFFF                  ; Otherwise, return -1
+                BRA done
+
+found_mnemonic  LDA MCMP_TEXT               ; Found it: return the address
+
+done            PLD
+                RTL
+                .pend
+;
+; Find the addressing mode matching the operand field
+;
+; Inputs:
+;   MARG3 = pointer to the operand field
+;
+; Outputs:
+;   A = the address mode code that matches the operand field ($FF if none)
+;
+AS_FIND_MODE    .proc
+                PHP
+                PHD
+
+                setdp <>MONITOR_VARS
+
+                setaxl
+                LDA MARG3                   ; Point MLINEBUF to the operand
+                STA MLINEBUF
+                LDA MARG3+2
+                STA MLINEBUF+2
+
+                LDA #<>ADDR_PATTERNS        ; Point to the first address mode pattern to check
+                STA MCMP_TEXT
+                LDA #`ADDR_PATTERNS
+                STA MCMP_TEXT+2
+
+match_loop      JSL AS_STR_MATCH            ; Check to see if the pattern matches the operand
+                BCS is_match                ; Yes: Find address mode code
+
+                JSL AS_MCMP_NEXT            ; Point to the address mode
+
+                setal
+                CLC                         ; Point to the first byte of the next pattern
+                LDA MCMP_TEXT
+                ADC #1
+                STA MCMP_TEXT
+                LDA MCMP_TEXT+2
+                ADC #0
+                STA MCMP_TEXT+2
+
+                setas
+                LDA [MCMP_TEXT]             ; Is the first byte 0?
+                BNE match_loop              ; No: check this next pattern
+
+                setal
+                LDA #$FFFF                  ; Yes: we didn't find a matching pattern, return -1
+                BRA done
+
+is_match        JSL AS_MCMP_NEXT            ; Point to the address mode
+                
+                setas                       ; We found a match
+                LDA [MCMP_TEXT]             ; Get the corresponding address mode code (a byte)
+                setal                       ; to return in A
+                AND #$00FF
+
+done            PLD
+                PLP
+                RTL
+                .pend
+
+;;
+;; Disassembler code
+;;
+
+;
+; Disassembler theory of operation:
+; DS_PR_LINE disassembles a line of machine code at MCURSOR
+; For any given opcode XX, it will look up a pointer to the mnemonic in MNEMONIC_TAB
+; and the addressing mode code in ADDRESS_TAB. The mnemonic will be printed by
+; DS_PR_MNEMONIC, and the operand by DS_PR_OPERAND (which uses the addressing mode
+; to determine how to print the operand and how many bytes are in the operand).
+;
+; DS_PR_LINE will also track the current values of the M and X bits from the status
+; register by taking REP and SEP instruction into account. These bits will be used
+; to determine operand size for certain immediate addressing cases. This method will
+; not be perfect, and the user will be expected to over-ride the values of M and X
+; when starting the disassembler.
+;
+
+; TODO: provide a means to over-ride the MX bits in MCPUSTAT
+
+;
+; Disassembler Testing Notes:
+;   30/3/2019 -- PJW -- Verified: single byte instructions, branches, JMP, JML, JSR, and JSL.
+;   31/3/2019 -- PJW -- Verified: ADC, SBC, CPx, INx, AND, EOR, ORA, BIT, TRB, TSB
+;                       ASL, LSR, ROL, ROR, BRK, COP, MVN, MVP, NOP, PEA, PEI, PER
+;                       LDA, LDX, LDY, STA, STX, STY
+;
+; TODO: REP/SEP and M/X bit interactions
+;
 
 ;
 ; Disassemble a block of memeory
@@ -215,7 +744,7 @@ check_lc        CMP #'f'+1
 ;   MARG1 = start address of the block (optional)
 ;   MARG2 = end address of the block (optional)
 ;
-DISASSEMBLE     .proc
+IMDISASSEMBLE   .proc
                 PHP
                 PHB
                 PHD
@@ -371,29 +900,6 @@ pr_operand      LDA ADDRESS_TAB,X       ; Get the addressing mode for the instru
                 .pend
 
 ;
-; Increment the monitor's memory cursor
-;
-M_INC_CURSOR    .proc
-                PHP
-                setal
-                PHA
-
-                CLC
-                LDA MCURSOR
-                ADC #1
-                STA MCURSOR
-                setas
-                LDA MCURSOR+2
-                ADC #0
-                STA MCURSOR+2
-
-                setal
-                PLA
-                PLP
-                RTL
-                .pend
-
-;
 ; Print the operand for an instruction
 ;
 ; Inputs:
@@ -404,7 +910,7 @@ M_INC_CURSOR    .proc
 ; On Return:
 ;   MCURSOR = pointer to the first byte of the next instruction
 ;
-DS_PR_OPERAND   ;.proc
+DS_PR_OPERAND   .proc
                 PHP
 
                 setas
@@ -670,7 +1176,7 @@ is_abs_ind_long LDA #'['
 done_1          JSL M_INC_CURSOR    ; Skip over a single byte operand
 done            PLP
                 RTL
-                ;.pend
+                .pend
 
 ;
 ; Print a single byte operand value
@@ -881,108 +1387,117 @@ M_PR_ADDR       .proc
                 RTL
                 .pend
 
+;;
+;; Tables to define mnemonics, opcodes, addressing modes, and their relationships
+;;
+;; Both the assembler and disassembler use these tables to translate between
+;; machine code and assembly code.
+;;
+
 ;
 ; Mnemonics
 ;
-MN_ORA      #MNEMONIC "ORA",MN_CLASS_01 | OP_M_EFFECT,0
-MN_AND      #MNEMONIC "AND",MN_CLASS_01 | OP_M_EFFECT,0
-MN_EOR      #MNEMONIC "EOR",MN_CLASS_01 | OP_M_EFFECT,0
-MN_ADC      #MNEMONIC "ADC",MN_CLASS_01 | OP_M_EFFECT,0
-MN_STA      #MNEMONIC "STA",MN_CLASS_01 | OP_M_EFFECT,0
-MN_LDA      #MNEMONIC "LDA",MN_CLASS_01 | OP_M_EFFECT,0
-MN_CMP      #MNEMONIC "CMP",MN_CLASS_01 | OP_M_EFFECT,0
-MN_SBC      #MNEMONIC "SBC",MN_CLASS_01 | OP_M_EFFECT,0
-MN_ASL      #MNEMONIC "ASL",MN_CLASS_10 | OP_M_EFFECT,0
-MN_ROL      #MNEMONIC "ROL",MN_CLASS_10 | OP_M_EFFECT,0
-MN_LSR      #MNEMONIC "LSR",MN_CLASS_10 | OP_M_EFFECT,0
-MN_ROR      #MNEMONIC "ROR",MN_CLASS_10 | OP_M_EFFECT,0
-MN_STX      #MNEMONIC "STX",MN_CLASS_10 | OP_X_EFFECT,0
-MN_LDX      #MNEMONIC "LDX",MN_CLASS_10 | OP_X_EFFECT,0
-MN_DEC      #MNEMONIC "DEC",MN_CLASS_10 | OP_M_EFFECT,0
-MN_INC      #MNEMONIC "INC",MN_CLASS_10 | OP_M_EFFECT,0
-MN_BIT      #MNEMONIC "BIT",MN_CLASS_00 | OP_M_EFFECT,0
-MN_JMP      #MNEMONIC "JMP",MN_CLASS_IRR,0
-MN_STY      #MNEMONIC "STY",MN_CLASS_00 | OP_X_EFFECT,0
-MN_LDY      #MNEMONIC "LDY",MN_CLASS_00 | OP_X_EFFECT,0
-MN_CPY      #MNEMONIC "CPY",MN_CLASS_00 | OP_X_EFFECT,0
-MN_CPX      #MNEMONIC "CPX",MN_CLASS_00 | OP_X_EFFECT,0
+MNEMONICS_TAB
+MN_ORA      #MNEMONIC "ORA"
+MN_AND      #MNEMONIC "AND"
+MN_EOR      #MNEMONIC "EOR"
+MN_ADC      #MNEMONIC "ADC"
+MN_STA      #MNEMONIC "STA"
+MN_LDA      #MNEMONIC "LDA"
+MN_CMP      #MNEMONIC "CMP"
+MN_SBC      #MNEMONIC "SBC"
+MN_ASL      #MNEMONIC "ASL"
+MN_ROL      #MNEMONIC "ROL"
+MN_LSR      #MNEMONIC "LSR"
+MN_ROR      #MNEMONIC "ROR"
+MN_STX      #MNEMONIC "STX"
+MN_LDX      #MNEMONIC "LDX"
+MN_DEC      #MNEMONIC "DEC"
+MN_INC      #MNEMONIC "INC"
+MN_BIT      #MNEMONIC "BIT"
+MN_JMP      #MNEMONIC "JMP"
+MN_STY      #MNEMONIC "STY"
+MN_LDY      #MNEMONIC "LDY"
+MN_CPY      #MNEMONIC "CPY"
+MN_CPX      #MNEMONIC "CPX"
 
-MN_BRK      #MNEMONIC "BRK",MN_CLASS_SB,$00
-MN_JSR      #MNEMONIC "JSR",MN_CLASS_IRR,$00
-MN_RTI      #MNEMONIC "RTI",MN_CLASS_SB,$40
-MN_RTS      #MNEMONIC "RTS",MN_CLASS_SB,$60
-MN_PHP      #MNEMONIC "PHP",MN_CLASS_SB,$08
-MN_PLP      #MNEMONIC "PLP",MN_CLASS_SB,$28
-MN_PHA      #MNEMONIC "PHA",MN_CLASS_SB,$48
-MN_PLA      #MNEMONIC "PLA",MN_CLASS_SB,$68
-MN_DEY      #MNEMONIC "DEY",MN_CLASS_SB,$88
-MN_TAY      #MNEMONIC "TAY",MN_CLASS_SB,$A8
-MN_INY      #MNEMONIC "INY",MN_CLASS_SB,$C8
-MN_INX      #MNEMONIC "INX",MN_CLASS_SB,$E8
-MN_CLC      #MNEMONIC "CLC",MN_CLASS_SB,$19
-MN_SEC      #MNEMONIC "SEC",MN_CLASS_SB,$38
-MN_CLI      #MNEMONIC "CLI",MN_CLASS_SB,$58
-MN_SEI      #MNEMONIC "SEI",MN_CLASS_SB,$78
-MN_TYA      #MNEMONIC "TYA",MN_CLASS_SB,$98
-MN_CLV      #MNEMONIC "CLV",MN_CLASS_SB,$B8
-MN_CLD      #MNEMONIC "CLD",MN_CLASS_SB,$D8
-MN_SED      #MNEMONIC "SED",MN_CLASS_SB,$F8
-MN_TXA      #MNEMONIC "TXA",MN_CLASS_SB,$8A
-MN_TXS      #MNEMONIC "TXS",MN_CLASS_SB,$9A
-MN_TAX      #MNEMONIC "TAX",MN_CLASS_SB,$AA
-MN_TSX      #MNEMONIC "TSX",MN_CLASS_SB,$BA
-MN_DEX      #MNEMONIC "DEX",MN_CLASS_SB,$CA
-MN_NOP      #MNEMONIC "NOP",MN_CLASS_SB,$EA
+MN_BRK      #MNEMONIC "BRK"
+MN_JSR      #MNEMONIC "JSR"
+MN_RTI      #MNEMONIC "RTI"
+MN_RTS      #MNEMONIC "RTS"
+MN_PHP      #MNEMONIC "PHP"
+MN_PLP      #MNEMONIC "PLP"
+MN_PHA      #MNEMONIC "PHA"
+MN_PLA      #MNEMONIC "PLA"
+MN_DEY      #MNEMONIC "DEY"
+MN_TAY      #MNEMONIC "TAY"
+MN_INY      #MNEMONIC "INY"
+MN_INX      #MNEMONIC "INX"
+MN_CLC      #MNEMONIC "CLC"
+MN_SEC      #MNEMONIC "SEC"
+MN_CLI      #MNEMONIC "CLI"
+MN_SEI      #MNEMONIC "SEI"
+MN_TYA      #MNEMONIC "TYA"
+MN_CLV      #MNEMONIC "CLV"
+MN_CLD      #MNEMONIC "CLD"
+MN_SED      #MNEMONIC "SED"
+MN_TXA      #MNEMONIC "TXA"
+MN_TXS      #MNEMONIC "TXS"
+MN_TAX      #MNEMONIC "TAX"
+MN_TSX      #MNEMONIC "TSX"
+MN_DEX      #MNEMONIC "DEX"
+MN_NOP      #MNEMONIC "NOP"
 
 ; Branches (follow format xxy10000)
-MN_BPL      #MNEMONIC "BPL",MN_CLASS_BR,$10
-MN_BMI      #MNEMONIC "BMI",MN_CLASS_BR,$30
-MN_BVC      #MNEMONIC "BVC",MN_CLASS_BR,$50
-MN_BVS      #MNEMONIC "BVS",MN_CLASS_BR,$70
-MN_BCC      #MNEMONIC "BCC",MN_CLASS_BR,$90
-MN_BCS      #MNEMONIC "BCS",MN_CLASS_BR,$B0
-MN_BNE      #MNEMONIC "BNE",MN_CLASS_BR,$D0
-MN_BEQ      #MNEMONIC "BEQ",MN_CLASS_BR,$F0
+MN_BPL      #MNEMONIC "BPL"
+MN_BMI      #MNEMONIC "BMI"
+MN_BVC      #MNEMONIC "BVC"
+MN_BVS      #MNEMONIC "BVS"
+MN_BCC      #MNEMONIC "BCC"
+MN_BCS      #MNEMONIC "BCS"
+MN_BNE      #MNEMONIC "BNE"
+MN_BEQ      #MNEMONIC "BEQ"
 
 ; 65C02
-MN_TSB      #MNEMONIC "TSB",MN_CLASS_IRR,$00
-MN_TRB      #MNEMONIC "TRB",MN_CLASS_IRR,$00
-MN_STZ      #MNEMONIC "STZ",MN_CLASS_IRR,$00
-MN_BRA      #MNEMONIC "BRA",MN_CLASS_IRR,$00
-MN_PHY      #MNEMONIC "PHY",MN_CLASS_SB,$5A
-MN_PLY      #MNEMONIC "PLY",MN_CLASS_SB,$7A
-MN_PHX      #MNEMONIC "PHX",MN_CLASS_SB,$DA
-MN_PLX      #MNEMONIC "PLX",MN_CLASS_SB,$FA
+MN_TSB      #MNEMONIC "TSB"
+MN_TRB      #MNEMONIC "TRB"
+MN_STZ      #MNEMONIC "STZ"
+MN_BRA      #MNEMONIC "BRA"
+MN_PHY      #MNEMONIC "PHY"
+MN_PLY      #MNEMONIC "PLY"
+MN_PHX      #MNEMONIC "PHX"
+MN_PLX      #MNEMONIC "PLX"
 
 ; 65816
-MN_PHD      #MNEMONIC "PHD",MN_CLASS_SB,$0B
-MN_PLD      #MNEMONIC "PLD",MN_CLASS_SB,$2B
-MN_PHK      #MNEMONIC "PHK",MN_CLASS_SB,$4B
-MN_RTL      #MNEMONIC "RTL",MN_CLASS_SB,$6B
-MN_PHB      #MNEMONIC "PHB",MN_CLASS_SB,$8B
-MN_PLB      #MNEMONIC "PLB",MN_CLASS_SB,$AB
-MN_WAI      #MNEMONIC "WAI",MN_CLASS_SB,$CB
-MN_XBA      #MNEMONIC "XBA",MN_CLASS_SB,$EB
-MN_TCS      #MNEMONIC "TCS",MN_CLASS_SB,$1B
-MN_TSC      #MNEMONIC "TSC",MN_CLASS_SB,$3B
-MN_TCD      #MNEMONIC "TCD",MN_CLASS_SB,$5B
-MN_TDC      #MNEMONIC "TDC",MN_CLASS_SB,$7B
-MN_TXY      #MNEMONIC "TXY",MN_CLASS_SB,$9B
-MN_TYX      #MNEMONIC "TYX",MN_CLASS_SB,$BB
-MN_STP      #MNEMONIC "STP",MN_CLASS_SB,$DB
-MN_XCE      #MNEMONIC "XCE",MN_CLASS_SB,$FB
-MN_COP      #MNEMONIC "COP",MN_CLASS_IRR,$02
-MN_JSL      #MNEMONIC "JSL",MN_CLASS_IRR,$22
-MN_WDM      #MNEMONIC "WDM",MN_CLASS_IRR,$42
-MN_PER      #MNEMONIC "PER",MN_CLASS_IRR,$62
-MN_BRL      #MNEMONIC "BRL",MN_CLASS_IRR,$82
-MN_REP      #MNEMONIC "REP",MN_CLASS_IRR,$C2
-MN_SEP      #MNEMONIC "SEP",MN_CLASS_IRR,$E2
-MN_MVP      #MNEMONIC "MVP",MN_CLASS_IRR,$44
-MN_MVN      #MNEMONIC "MVN",MN_CLASS_IRR,$54
-MN_PEI      #MNEMONIC "PEI",MN_CLASS_IRR,$D4
-MN_PEA      #MNEMONIC "PEA",MN_CLASS_IRR,$F4
-MN_JML      #MNEMONIC "JML",MN_CLASS_IRR,$DC
+MN_PHD      #MNEMONIC "PHD"
+MN_PLD      #MNEMONIC "PLD"
+MN_PHK      #MNEMONIC "PHK"
+MN_RTL      #MNEMONIC "RTL"
+MN_PHB      #MNEMONIC "PHB"
+MN_PLB      #MNEMONIC "PLB"
+MN_WAI      #MNEMONIC "WAI"
+MN_XBA      #MNEMONIC "XBA"
+MN_TCS      #MNEMONIC "TCS"
+MN_TSC      #MNEMONIC "TSC"
+MN_TCD      #MNEMONIC "TCD"
+MN_TDC      #MNEMONIC "TDC"
+MN_TXY      #MNEMONIC "TXY"
+MN_TYX      #MNEMONIC "TYX"
+MN_STP      #MNEMONIC "STP"
+MN_XCE      #MNEMONIC "XCE"
+MN_COP      #MNEMONIC "COP"
+MN_JSL      #MNEMONIC "JSL"
+MN_WDM      #MNEMONIC "WDM"
+MN_PER      #MNEMONIC "PER"
+MN_BRL      #MNEMONIC "BRL"
+MN_REP      #MNEMONIC "REP"
+MN_SEP      #MNEMONIC "SEP"
+MN_MVP      #MNEMONIC "MVP"
+MN_MVN      #MNEMONIC "MVN"
+MN_PEI      #MNEMONIC "PEI"
+MN_PEA      #MNEMONIC "PEA"
+MN_JML      #MNEMONIC "JML"
+            .byte 0, 0
 
 ;
 ; Map each opcode to its mnemonic
@@ -1020,7 +1535,7 @@ MNEMONIC_TAB    .word <>MN_BRK, <>MN_ORA, <>MN_COP, <>MN_ORA, <>MN_TSB, <>MN_ORA
                 .word <>MN_LDY, <>MN_LDA, <>MN_LDX, <>MN_LDA, <>MN_LDY, <>MN_LDA, <>MN_LDX, <>MN_LDA    ; Ax
                 .word <>MN_TAY, <>MN_LDA, <>MN_TAX, <>MN_PLB, <>MN_LDY, <>MN_LDA, <>MN_LDX, <>MN_LDA
 
-                .word <>MN_BCS, <>MN_LDA, <>MN_LDA, <>MN_LDY, <>MN_LDA, <>MN_LDY, <>MN_LDX, <>MN_LDA    ; Bx
+                .word <>MN_BCS, <>MN_LDA, <>MN_LDA, <>MN_LDA, <>MN_LDY, <>MN_LDA, <>MN_LDX, <>MN_LDA    ; Bx
                 .word <>MN_CLV, <>MN_LDA, <>MN_TSX, <>MN_TYX, <>MN_LDY, <>MN_LDA, <>MN_LDX, <>MN_LDA
 
                 .word <>MN_CPY, <>MN_CMP, <>MN_REP, <>MN_CMP, <>MN_CPY, <>MN_CMP, <>MN_DEC, <>MN_CMP    ; Cx
@@ -1034,6 +1549,8 @@ MNEMONIC_TAB    .word <>MN_BRK, <>MN_ORA, <>MN_COP, <>MN_ORA, <>MN_TSB, <>MN_ORA
 
                 .word <>MN_BEQ, <>MN_SBC, <>MN_SBC, <>MN_SBC, <>MN_PEA, <>MN_SBC, <>MN_INC, <>MN_SBC    ; Fx
                 .word <>MN_SED, <>MN_SBC, <>MN_PLX, <>MN_XCE, <>MN_JSR, <>MN_SBC, <>MN_INC, <>MN_SBC
+
+                .word 0
                 
 ;
 ; Map each opcode to its addressing mode
@@ -1117,4 +1634,36 @@ ADDRESS_TAB     .byte ADDR_IMPLIED, ADDR_DP_IND_X, ADDR_IMM, ADDR_SP_R          
                 .byte ADDR_ABS, ADDR_DP_X, ADDR_DP_X, ADDR_DP_Y_LONG
                 .byte ADDR_IMPLIED, ADDR_ABS_Y, ADDR_IMPLIED, ADDR_IMPLIED
                 .byte ADDR_ABS_X_ID, ADDR_ABS_X, ADDR_ABS_X, ADDR_ABS_X_LONG
+
+; The lengths of the operands in the various addressing modes
+ADDR_LENGTH     .byte 1, 1, 1, 2, 1, 1, 2, 2, 0, 1, 1, 3, 1, 1, 3, 1, 2, 1, 1, 0, 2, 2, 2, 2
+
+; Map address mode syntax patterns to address mode code
+; NOTE: the order is important. When multiple patterns
+; start the same way, list longer patterns first to avoid
+; ambiguity.
+ADDR_PATTERNS   #DEFMODE "A", ADDR_ACC
+                #DEFMODE "dd:dddd,X", ADDR_ABS_X_LONG
+                #DEFMODE "dd:dddd", ADDR_ABS_LONG
+                #DEFMODE "dddd,X", ADDR_ABS_X
+                #DEFMODE "dddd,Y", ADDR_ABS_Y
+                #DEFMODE "dddd", ADDR_ABS
+                #DEFMODE "dd,X", ADDR_DP_X
+                #DEFMODE "dd,Y", ADDR_DP_Y
+                #DEFMODE "dd,S", ADDR_SP_R
+                #DEFMODE "dd", ADDR_DP
+                #DEFMODE "#dddd", ADDR_IMM | OP_M_EFFECT | OP_X_EFFECT
+                #DEFMODE "#dd,#dd", ADDR_XYC
+                #DEFMODE "#dd", ADDR_IMM
+                #DEFMODE "(dd,S),Y", ADDR_SP_R_Y
+                #DEFMODE "(dddd,X)", ADDR_ABS_X_ID
+                #DEFMODE "(dddd)", ADDR_ABS_X_ID
+                #DEFMODE "(dd,X)", ADDR_DP_IND_X
+                #DEFMODE "(dd),Y", ADDR_DP_IND_Y
+                #DEFMODE "(dd)", ADDR_DP_IND
+                #DEFMODE "[dddd]", ADDR_ABS_IND_LONG
+                #DEFMODE "[dd],Y", ADDR_DP_Y_LONG
+                #DEFMODE "[dd]", ADDR_DP_LONG
+                .byte 0, 0
+
 .dpage 0
