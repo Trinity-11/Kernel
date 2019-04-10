@@ -151,6 +151,8 @@ greet           setdbr `greet_msg       ;Set data bank to ROM
                 ;JSL INITKEYBOARD ;
                 ;JSL ITESTSID
 
+                JML MONITOR
+
                 setaxl
                 LDX #<>OPL2_test_msg
                 JSL IPRINT       ; print the first line

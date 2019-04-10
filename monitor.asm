@@ -154,9 +154,11 @@ IMSTATUS        ; Print the MONITOR prompt (registers header)
                 ; print Flags
                 LDA ' '
                 JSL IPUTC
-                LDY #1
-                LDX #CPUFLAGS
-                JSL IPRINTH
+                PHP
+                setas
+                LDA CPUFLAGS
+                JSL MPRINTB
+                PLP
 
                 JSL IPRINTCR
 
@@ -619,6 +621,43 @@ try_next        INX
                 BRA loop
 
 done            PLX
+                PLP
+                RTL
+                .pend
+
+;
+; Print a byte as a string of binary digits
+;
+; Inputs:
+;   A = the byte to print 
+;
+MPRINTB         .proc
+                PHP
+                setxl
+                setas
+                PHX
+
+                ; M is clear, so accumulator is short and we shift 8 bits
+                LDX #8          ; Set number of bits to print to 8
+
+loop            ASL A           ; Shift MSB to C
+                BCS is_one
+
+                ; MSB was 0, to print a '0'
+                PHA             ; Save value to print
+                LDA #'0'        ; Print '0'
+                JSL IPUTC
+                BRA continue
+
+is_one          PHA             ; Save value to print
+                LDA #'1'        ; Print '1'
+                JSL IPUTC
+                
+continue        PLA
+                DEX             ; Count down the bits to shift
+                BNE loop        ; And try the next one if there is one
+
+                PLX             ; Otherwise, return
                 PLP
                 RTL
                 .pend
