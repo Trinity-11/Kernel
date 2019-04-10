@@ -4,22 +4,24 @@
 .include "page_00_inc.asm"
 .include "page_00_data.asm"
 .include "page_00_code.asm"
-.include "dram_inc.asm"
-.include "vicky_def.asm"
-.include "super_io_def.asm"
-.include "keyboard_def.asm"
-.include "SID_def.asm"
-.include "RTC_def.asm"
-.include "Math_def.asm"
-.include "io_def.asm"
-.include "monitor.asm"
-.include "SDOS.asm"
-.include "OPL2_Library.asm"
-; C256 Foenix / Nu64 Kernel
-; Loads to $F0:0000
+.include "Math_def.asm"       ; Math Co_processor Definition
+.include "interrupt_def.asm"  ; Interrupr Controller Registers Definitions
+.include "dram_inc.asm"       ; old Definition file that was supposed to be a Memory map
+.include "vicky_def.asm"      ; VICKY's registers Definitions
+.include "super_io_def.asm"   ; SuperIO Registers Definitions
+.include "keyboard_def.asm"   ; Keyboard 8042 Controller (in SuperIO) bit Field definitions
+.include "SID_def.asm"        ; SID, but not the latest - Deprecated for now.
+.include "RTC_def.asm"        ; Real-Time Clock Register Definition (BQ4802)
+.include "io_def.asm"         ; Joystick, DipSwitch, CODEC, SDCard Controller Registers
+.include "monitor.asm"        ; Tom's early code for the Monitor (Possibly useful for PJW)
+.include "SDOS.asm"           ; Code Library for SD Card Controller (Working, needs a lot improvement and completion)
+.include "OPL2_Library.asm"   ; Library code to drive the OPL2 (right now, only in mono (both side from the same data))
+.include "BM437_ATI_FontSet.asm" ; This is the Official (I modified 2 Chars for the Foenix Logo) PC 8x8 Char Set from the ATI BIOS
+; C256 Foenix Kernel
+; The Kernel is located in flash @ F8:0000 but not accessible by CPU
+; Kernel Transfered by GAVIN @ Cold Reset to $18:0000 - $1F:FFFF
 
-;Kernel.asm
-;Jump Table
+; Loads to $18:0000
 
 .include "kernel_jumptable.asm"
 
@@ -80,57 +82,34 @@ CLEAR_MEM_LOOP
                 STX COLS_PER_LINE
                 LDY #64
                 STY LINES_MAX
-;                LDA #$05 ; TOTAL Reset of CH376S
-;                STA SDCARD_CMD;
-                ;JSL RESETCODEC
-                setas
-                LDA JOYSTICK0
-                STA @lSTEF_BLOB_BEGIN
-                LDA JOYSTICK1
-                STA @lSTEF_BLOB_BEGIN+1
-                LDA JOYSTICK2
-                STA @lSTEF_BLOB_BEGIN+2
-                LDA JOYSTICK3
-                STA @lSTEF_BLOB_BEGIN+3
-                LDA DIPSWITCH
-                STA @lSTEF_BLOB_BEGIN+4
-;                LDA #$01 ; GET IC CH376S Version
-;                STA SDCARD_CMD;
+
                 setaxl
-                ; Initialize Super IO Chip
-                ;JSL INITCODEC
-                ;LDA SDCARD_DATA;
 
-                ;JSL INITSUPERIO
+                ; Init CODEC
+                JSL INITCODEC
+                ; Init Suprt IO (Keyboard/Floppy/Etc...)
+                JSL INITSUPERIO
+                ; Init Real Time Clock
+                JSL INITRTC
+                ; Init GAMMA Table
 
-                ; Init the RTC (Test the Interface)
-                ;JSL INITRTC
-                ; INIT The FONT Memory
-
-                ; Init Globacl Look-up Table
                 JSL INITGAMMATABLE
-
-                ; Init All the Graphic Mode Look-up Table
+                ; Init All the Graphic Mode Look-up Table (by default they are all Zero)
                 JSL INITALLLUT
-
                 ; Initialize the Character Color Foreground/Background LUT First
                 JSL INITCHLUT
-
                 ; Go Enable and Setup the Cursor's Position
                 JSL INITCURSOR
-
-                ; Init the Basic Value for the Graphic Mode
-                JSL INITVKYGRPMODE
-
                 ; Init the Vicky Text MODE
                 JSL INITVKYTXTMODE
-                JSL INITTILEMODE  ; This is to Test Tiles`
-
+                ; Load The FONT Memory with local FONT in Flash (or RAM)
+                JSL IINITFONTSET
                 ; Now, clear the screen and Setup Foreground/Background Bytes, so we can see the Text on screen
                 JSL ICLRSCREEN  ; Clear Screen and Set a standard color in Color Memory
-                JSL ICOLORFLAG
-
-                setal
+                ; Init Globacl Look-up Table
+                ; Go set the Color Text Memory so we can have color for the LOGO
+                JSL ICOLORFLAG  ; This is to set the Color Memory for the Logo
+                setaxl
                 ; Write the Greeting Message Here, after Screen Cleared and Colored
 greet           setdbr `greet_msg       ;Set data bank to ROM
                 LDX #<>greet_msg
@@ -138,283 +117,23 @@ greet           setdbr `greet_msg       ;Set data bank to ROM
                  ; Let's Change the Color Memory For the Logo
                 LDX #<>version_msg
                 JSL IPRINT       ; print the first line
-                LDX #<>init_rtc_msg
-                JSL IPRINT       ; print the RTC Init Message
-                LDX #<>init_lpc_msg
-                JSL IPRINT       ; print the Init
                 setdp 0
-                JSL ITESTMATH
-                ; Init KeyBoard
-                LDX #<>init_kbrd_msg
-                JSL IPRINT       ; print the Keybaord Init Message
 
-                ;JSL INITKEYBOARD ;
-                ;JSL ITESTSID
-
-                JML MONITOR
-
+                ; Init the Keyboard
+                JSL INITKEYBOARD ;
+                ; Print the legendary "Ready." on screen with Cursor below
                 setaxl
-                LDX #<>OPL2_test_msg
+                LDX #<>ready_msg
+
                 JSL IPRINT       ; print the first line
-                ;JSL OPL2_TONE_TEST
 
-                JSL SDOS_INIT;       // Go Init the CH376S in SDCARD mod
-                JSL SDOS_DIR
+                CLI ; Make sure no Interrupt will come and fuck up Init before this point.
 
-                setaxs
-                LDX #$00
-                ; Transfer the name in the Right location
-COPYFILENAME;
-                LDA @lsplashfilename, X
-                STA @lSDOS_FILE_NAME, X
-                INX
-                CMP #$00
-                BNE COPYFILENAME;
-                ;; Load the File @ $10:0000  (128K Boundary)
-                LDA #$00
-                STA SDCARD_FILE_PTR
-                STA BMP_PRSE_SRC_PTR
-                STA SDCARD_FILE_PTR+1
-                STA BMP_PRSE_SRC_PTR+1
-                STA SDCARD_FILE_PTR+3
-                STA BMP_PRSE_SRC_PTR+3
-                LDA #$10
-                STA SDCARD_FILE_PTR+2
-                STA BMP_PRSE_SRC_PTR+2
-                JSL SDOS_LOAD;  Go Load the BMP File for the Splash Screen
-
-                setas
-                LDA #~Mstr_Ctrl_Text_Mode_En     ;Okay, this Enables the Text Mode (Video Display)
-                STA MASTER_CTRL_REG_L
-                ; Go Fill the Screen with Zeros
-                setal
-                LDA #640
-                STA BM_CLEAR_SCRN_X
-                LDA #480
-                STA BM_CLEAR_SCRN_Y
-                LDA #$C000
-                STA BMP_PRSE_DST_PTR
-                LDA #$00B0
-                STA BMP_PRSE_DST_PTR+2
-                JSL BM_FILL_SCREEN
-
-                LDA #$0280
-                STA SCRN_X_STRIDE
-                ;; Let's put the image in the middle of the Screen
-                LDA #$00AA
-                STA BMP_POSITION_X
-                LDA #$005A
-                STA BMP_POSITION_Y
-                setas
-                setxl
-                LDA #$00
-                STA BMP_PRSE_DST_PTR
-                STA BMP_PRSE_DST_PTR+3
-                LDA #$C0
-                STA BMP_PRSE_DST_PTR+1
-                LDA #$B0
-                STA BMP_PRSE_DST_PTR+2
-
-
-                LDX #<>bmp_parser_msg1
-                JSL IPRINT       ; print the first line
-                ; Now that the
-                LDX #$0000 ; Load the File LUT in LUT0
-                JSL BMP_PARSER
-
-                setas
-                LDA #$01          ; Enable Bit-Map and uses LUT0
-                STA @lBM_CONTROL_REG
-MAIN_NOTLOADED
-
-;
-; Load the Tile Set File for the Demo
-;
-                LDX #<>tile_msg1
-                JSL IPRINT       ; print the first line
-                setxl
-                setas
-                LDX #$0000
-TRANSFER_GRAPH
-                LDA @lTILE0_MAP,X
-                STA @l$B80000,X
-                INX
-                CPX #$0000
-                BNE TRANSFER_GRAPH
-                NOP
-                LDX #$0000
-;
-;Load the Tile Pattern in the Tile memory
-; 29 x 64
-TRANSFER_TILEMAP0
-                LDA @lTILE_MAP_CONTENT0,X
-                STA @lTILE_MAP0,X
-                INX
-                CPX #(29*64)
-                BNE TRANSFER_TILEMAP0
-                NOP
-                LDX #$0000
-;
-TRANSFER_TILEMAP1
-                LDA #$B3
-                STA @lTILE_MAP1,X
-                INX
-                CPX #(11*64)
-                BNE TRANSFER_TILEMAP1
-                NOP
-                LDX #$0000
-
-TRANSFER_SPRITES ;
-                LDA @lJUMPMAN_SPRITES,X
-                STA @l$B90000,X
-                INX
-                CPX #$4400
-                BNE TRANSFER_SPRITES
-                NOP
-
-                LDX #$0000
-TRANSFER_GRAPH_LUT
-                LDA @lTILE0_PALETTE,X
-                STA @lGRPH_LUT1_PTR,X
-                INX
-                CPX #$0400
-                BNE TRANSFER_GRAPH_LUT
-                NOP
-
-                setaxs
-                ;First Setup Tile Layer 0
-                LDA #$83    ; Enable The Layer bit[0], and we choose LUT1 bit[3:1] and bit[7] = 256x256 Tile Page stride
-                STA @lTL0_CONTROL_REG
-                LDA #$00    ; Set the Starting Address of Graphic Map Location
-                STA @lTL0_START_ADDY_L
-                LDA #$00
-                STA @lTL0_START_ADDY_M
-                LDA #$08    ; $B8:0000 (in graphic Mem) = $B0:6000 in Absolute Value
-                STA @lTL0_START_ADDY_H
-
-                LDA #$00    ; Set the X Stride to 256 (not implemented Yet)
-                STA @lTL0_MAP_X_STRIDE_L
-                LDA #$01
-                STA @lTL0_MAP_X_STRIDE_H
-                LDA #$00    ; Set the Y Stride to 256 (not implemented Yet)
-                STA @lTL0_MAP_Y_STRIDE_L
-                LDA #$01
-                STA @lTL0_MAP_Y_STRIDE_H
-
-                ;First Setup Tile Layer 1
-                LDA #$83    ; Enable The Layer bit[0], and we choose LUT1 bit[3:1] and bit[7] = 256x256 Tile Page stride
-                STA @lTL1_CONTROL_REG
-                LDA #$00    ; Set the Starting Address of Graphic Map Location
-                STA @lTL1_START_ADDY_L
-                LDA #$00
-                STA @lTL1_START_ADDY_M
-                LDA #$08    ; $B8:0000 (in graphic Mem) = $B0:6000 in Absolute Value
-                STA @lTL1_START_ADDY_H
-
-                LDA #$00    ; Set the X Stride to 256 (not implemented Yet)
-                STA @lTL1_MAP_X_STRIDE_L
-                LDA #$01
-                STA @lTL1_MAP_X_STRIDE_H
-                LDA #$00    ; Set the Y Stride to 256 (not implemented Yet)
-                STA @lTL1_MAP_Y_STRIDE_L
-                LDA #$01
-                STA @lTL1_MAP_Y_STRIDE_H
-
-
-                ; Install the Sprites
-                JSL INITSPRITE ; This is to test Sprites
-
-                setaxl
-                LDA #64+(0*32)
-                STA SP00_X_POS_L
-                LDA #64+(1*32)-8
-                STA SP01_X_POS_L
-                LDA #64+(2*32)-16
-                STA SP02_X_POS_L
-                LDA #64+(3*32)-24
-                STA SP03_X_POS_L
-                LDA #64+(4*32)-32
-                STA SP04_X_POS_L
-                LDA #64+(5*32)-40
-                STA SP05_X_POS_L
-                LDA #64+(6*32)-48
-                STA SP06_X_POS_L
-
-                LDA #80+(0*32)
-                STA SP07_X_POS_L
-                LDA #80+(1*32)-8
-                STA SP08_X_POS_L
-                LDA #80+(2*32)-16
-                STA SP09_X_POS_L
-                LDA #80+(3*32)-24
-                STA SP10_X_POS_L
-                LDA #80+(4*32)-32
-                STA SP11_X_POS_L
-                LDA #80+(5*32)-40
-                STA SP12_X_POS_L
-
-                LDA #64+(0*32)
-                STA SP13_X_POS_L
-                LDA #64+(1*32)
-                STA SP14_X_POS_L
-                LDA #64+(2*32)
-                STA SP15_X_POS_L
-                LDA #64+(3*32)
-                STA SP16_X_POS_L
-
-                LDA #64
-                STA SP00_Y_POS_L  ;J
-                STA SP01_Y_POS_L  ;u
-                STA SP02_Y_POS_L  ;m
-                STA SP03_Y_POS_L  ;p
-                STA SP04_Y_POS_L  ;m
-                STA SP05_Y_POS_L  ;a
-                STA SP06_Y_POS_L  ;n
-                LDA #96
-                STA SP07_Y_POS_L  ;S
-                STA SP08_Y_POS_L  ;e
-                STA SP09_Y_POS_L  ;n
-                STA SP10_Y_POS_L  ;i
-                STA SP11_Y_POS_L  ;o
-                STA SP12_Y_POS_L  ;r
-                LDA #128
-                STA SP13_Y_POS_L  ;n
-                STA SP14_Y_POS_L  ;i
-                STA SP15_Y_POS_L  ;o
-                STA SP16_Y_POS_L  ;r
-                setdp 0
-                setaxl
-                ;LDX #$0
-                ;LDY #16
-                ;JSL ILOCATE
-
-                CLI
-
-                ; reset keyboard buffer
-                ;STZ KEY_BUFFER_RPOS
-                ;STZ KEY_BUFFER_WPOS
-
-                ; ; Copy vectors from ROM to Direct Page
-                ; setaxl
-                ; LDA #$FF
-                ; LDX #$FF00
-                ; LDY #$FF00
-                ; MVP $00, $FF
-
-                ; display boot message
-;greet           setdbr `greet_msg       ;Set data bank to ROM
-;                LDX #<>greet_msg
-;                JSL IPRINT       ; print the first line
-;                JSL IPRINT       ; print the second line
-;                JSL IPRINT       ; print the third line
-;                JSL IPRINTCR     ; print a blank line. Just because
                 setas
                 setdbr $01      ;set data bank to 1 (Kernel Variables)
 
 endlessloop     NOP
                 JML endlessloop
-
-
 
 greet_done      BRK             ;Terminate boot routine and go to Ready handler.
 
@@ -1024,6 +743,9 @@ IINITVKYTXTMODE PHA
                 STA BORDER_COLOR_G
                 LDA #Border_Ctrl_Enable   ; Enable the Border
                 STA BORDER_CTRL_REG
+                ; Enable the Text Mode Only
+                LDA #Mstr_Ctrl_Text_Mode_En
+                STA MASTER_CTRL_REG_L
                 setaxl        ; Set Acc back to 16bits before setting the Cursor Position
                 PLA
                 RTL
@@ -1060,53 +782,7 @@ IINITVKYGRPMODE
                 RTL
 
 IINITTILEMODE
-                PHA
-                setas
-                setxl        ; Set Acc back to 16bits before setting the Cursor Position
-                ;First Setup Tile Layer 0
-                LDA #$01    ; Enable The Layer
-                STA @lTL0_CONTROL_REG
-                LDA #$00    ; Set the Starting Address of Graphic Map Location
-                STA @lTL0_START_ADDY_L
-                STA @lTL0_START_ADDY_H
-                LDA #$60    ; $00:60000 (in graphic Mem) = $B0:6000 in Absolute Value
-                STA @lTL0_START_ADDY_M
-                LDA #$00    ; Set the X Stride to 256 (not implemented Yet)
-                STA @lTL0_MAP_X_STRIDE_L
-                LDA #$01
-                STA @lTL0_MAP_X_STRIDE_H
-                LDA #$00    ; Set the Y Stride to 256 (not implemented Yet)
-                STA @lTL0_MAP_Y_STRIDE_L
-                LDA #$01
-                STA @lTL0_MAP_Y_STRIDE_H
-                ; Set some Characters in TILE_MAP0 Memory Bank
-                ; 36 Tiles x 26 Tiles (when the border is on)
-                LDX #$0000
-TILEMAPSET_LOOP
-                LDA #$02
-                STA @lTILE_MAP0+128, x   ; This ought to fill the first line
-;                LDA #$02
-                STA @lTILE_MAP0+1728, x
-                INX
-                CPX #$0036    ; 36 - 4 (because of Border)
-                BNE TILEMAPSET_LOOP
-                ;Just fill some tiles with Solid colors
-                LDX #$0000
-INITTILE_LOOP
-                LDA #$00    ; This is 1 Color
-                LDA @lTILE_TEST_CH00,x
-                STA @l$B06000, x
-                LDA @lTILE_TEST_CH01,x
-                STA @l$B06100, x
-                LDA @lTILE_TEST_CH02,x
-                STA @l$B06200, x
-                LDA #$FF
-                STA @l$B06300, x
-                INX
-                CPX #$0100
-                BNE INITTILE_LOOP
-                setal
-                PLA
+
                 RTL
 
 IINITSPRITE     PHA
@@ -1214,6 +890,25 @@ IINITSPRITE     PHA
 ; Affects:
 ;  Vicky's Internal FONT Memory
 IINITFONTSET
+                setas
+                setxl
+                LDX #$0000
+initFontsetbranch0
+                LDA @lFONT_4_BANK0,X    ; RAM Content
+                STA @lFONT_MEMORY_BANK0,X ; Vicky FONT RAM Bank
+                INX
+                CPX #$0800
+                BNE initFontsetbranch0
+                NOP
+                LDX #$0000
+initFontsetbranch1
+                LDA @lBM437_ATI_8X8_Font_Set,X
+                STA @lFONT_MEMORY_BANK1,X ; Vicky FONT RAM Bank
+                INX
+                CPX #$0800
+                BNE initFontsetbranch1
+                NOP
+                setaxl
                 RTL
 
 ;
@@ -2007,7 +1702,7 @@ IRQ_HANDLER
                 ; This is very temporary, in reality this is Where
                 ; there should be some parsing to know which Interrupt is Active
                 ; And process it accordingly
-                ; Clear Any pending Interrupt of Block0                
+                ; Clear Any pending Interrupt of Block0
                 LDA @lINT_PENDING_REG0 ; Clear the Pending INTERRUPT
                 STA @lINT_PENDING_REG0 ; Clear the Pending INTERRUPT
                 ; Clear Any pending Interrupt of Block1
@@ -2019,6 +1714,7 @@ IRQ_HANDLER
 
 
                 ldx #$0000
+                setxs
 IRQ_HANDLER_FETCH
                 LDA KBD_INPT_BUF        ; Get Scan Code from KeyBoard
                 STA KEYBOARD_SC_TMP     ; Save Code Immediately
@@ -2075,6 +1771,7 @@ ALT_KEY_ON      LDA @lScanCode_Alt_Set1, x
 
                 ; Write Character to Screen (Later in the buffer)
 KB_WR_2_SCREEN
+                setxl
                 JSL PUTC
                 JMP KB_CHECK_B_DONE
 
@@ -2164,9 +1861,9 @@ ISCRGETWORD     BRK ; Read a current word on the screen. A word ends with a spac
 ;
 KERNEL_DATA
 greet_msg       .text $20, $20, $20, $20, $EC, $A9, $EC, $A9, $EC, $A9, $EC, $A9, $EC, $A9, "C256 FOENIX DEVELOPMENT SYSTEM",$0D
-                .text $20, $20, $20, $EC, $A9, $EC, $A9, $EC, $A9, $EC, $A9, $EC, $A9, $20, "8/16 Bits OPEN SOURCE COMPUTER",$0D
-                .text $20, $20, $EC, $A9, $EC, $A9, $EC, $A9, $EC, $A9, $EC, $A9, $20, $20, "PCB Revision B2",$0D
-                .text $20, $EC, $A9, $EC, $A9, $EC, $A9, $EC, $A9, $EC, $A9, $20, $20, $20, "Created by: STEFANY ALLAIRE",$0D
+                .text $20, $20, $20, $EC, $A9, $EC, $A9, $EC, $A9, $EC, $A9, $EC, $A9, $20, "Software Development Team: TBD",$0D
+                .text $20, $20, $EC, $A9, $EC, $A9, $EC, $A9, $EC, $A9, $EC, $A9, $20, $20, "Hardware platform Created by: Stefany Allaire",$0D
+                .text $20, $EC, $A9, $EC, $A9, $EC, $A9, $EC, $A9, $EC, $A9, $20, $20, $20, "www.c256foenix.com",$0D
                 .text $EC, $A9, $EC, $A9, $EC, $A9, $EC, $A9, $EC, $A9, $20, $20, $20, $20, "2048KB CODE RAM  4096K VIDEO MEM",$00
 
 greet_clr_line1 .text $1D, $1D, $1D, $1D, $1D, $1D, $8D, $8D, $4D, $4D, $2D, $2D, $5D, $5D
@@ -2209,11 +1906,7 @@ bg_color_lut	  .text $00, $00, $00, $FF
                 .text $40, $40, $40, $FF
                 .text $FF, $FF, $FF, $FF
 
-version_msg     .text $0D, "Debug Code Version 0.0.15 - Feb 22th, 2019", $00
-init_lpc_msg    .text "Init SuperIO...", $0D, $00
-init_kbrd_msg   .text "Init Keyboard...", $0D, $00
-init_rtc_msg    .text "Init RTC...", $0D, $00
-test_SID_msg    .text "Testing Right & Left SID", $0D, $00
+version_msg     .text $0D, "Debug Code Version 0.0.0 - March 26th, 2019", $00
 pass_tst0xAAmsg .text "Cmd 0xAA Test passed...", $0D, $00
 pass_tst0xABmsg .text "Cmd 0xAB Test passed...", $0D, $00
 pass_cmd0x60msg .text "Cmd 0x60 Executed.", $0D, $00
@@ -2223,27 +1916,21 @@ Success_kb_init .text "Keyboard Present", $0D, $00
 Failed_kb_init  .text "No Keyboard Attached or Failed Init...", $0D, $00
 irq_Msg         .text "[IRQ Interrupt]", $0D, $00
 nmi_Msg         .text "[NMI Interrupt]", $0D, $00
-splashfilename  .text "/FOENIX.BMP", $00
-tileset0_fname  .text "/TILE0.BMP", $00
 bmp_parser_err0 .text "NO SIGNATURE FOUND.", $00
 bmp_parser_msg0 .text "BMP LOADED.", $00
 bmp_parser_msg1 .text "EXECUTING BMP PARSER", $00
-OPL2_test_msg   .text "OPL2 TONE TEST... CAN YOU HEAR IT?", $00
-tile_msg1       .text "LOADING TILE PAGE 0", $00
 
 ready_msg       .null $0D,"READY."
-hello_basic     .null "10 PRINT ""Hello World""",$0D
-                .null "RUN",$0D
-                .null "Hello World",$0D
-                .null $0D,"READY."
+
 hello_ml        .null "G 020000",$0D
                 .null "HELLO WORLD",$0D
                 .null $0D
                 .null " PC     A    X    Y    SP   DBR DP   NVMXDIZC",$0D
                 .null ";002112 0019 F0AA 0000 D6FF F8  0000 --M-----"
+
 error_01        .null "ABORT ERROR"
 hex_digits      .text "0123456789ABCDEF",0
-
+.align 256
 ;                           $00, $01, $02, $03, $04, $05, $06, $07, $08, $09, $0A, $0B, $0C, $0D, $0E, $0F
 ScanCode_Press_Set1   .text $00, $1B, $31, $32, $33, $34, $35, $36, $37, $38, $39, $30, $2D, $3D, $08, $09    ; $00
                       .text $71, $77, $65, $72, $74, $79, $75, $69, $6F, $70, $5B, $5D, $0D, $00, $61, $73    ; $10
@@ -2341,132 +2028,6 @@ RANDOM_LUT_Tbl		    .text  $1d, $c8, $a7, $ac, $10, $d6, $52, $7c, $83, $dd, $ce
 				              .text  $a5, $5c, $57, $2f, $99, $dc, $2e, $8a, $44, $bc, $ec, $db, $22, $58, $fc, $be
 				              .text  $5f, $3f, $50, $bd, $2a, $36, $ab, $ae, $24, $aa, $82, $11, $5c, $9f, $43, $4d
 				              .text  $8f, $0c, $20, $00, $91, $b6, $45, $9e, $3e, $3d, $66, $7e, $0a, $1c, $6b, $74
-
-TILE_TEST_CH00        .text  $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-                      .text  $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-                      .text  $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-                      .text  $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-                      .text  $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-                      .text  $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-                      .text  $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-                      .text  $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-                      .text  $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-                      .text  $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-                      .text  $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-                      .text  $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-                      .text  $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-                      .text  $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-                      .text  $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-                      .text  $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-;
-;
-TILE_TEST_CH01        .text  $24, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24
-                      .text  $24, $00, $33, $33, $00, $00, $00, $00, $00, $00, $00, $00, $33, $33, $00, $24
-                      .text  $24, $00, $33, $33, $00, $00, $00, $00, $00, $00, $00, $00, $33, $33, $00, $24
-                      .text  $24, $00, $33, $33, $00, $00, $00, $00, $00, $00, $00, $00, $33, $33, $00, $24
-                      .text  $24, $00, $33, $33, $00, $00, $00, $00, $00, $00, $00, $00, $33, $33, $00, $24
-                      .text  $24, $00, $33, $33, $00, $00, $00, $00, $00, $00, $00, $00, $33, $33, $00, $24
-                      .text  $24, $00, $33, $33, $00, $00, $00, $00, $00, $00, $00, $00, $33, $33, $00, $24
-                      .text  $24, $00, $33, $33, $00, $00, $00, $00, $00, $00, $00, $00, $33, $33, $00, $24
-                      .text  $24, $00, $33, $33, $00, $00, $00, $00, $00, $00, $00, $00, $33, $33, $00, $24
-                      .text  $24, $00, $33, $33, $00, $00, $00, $00, $00, $00, $00, $00, $33, $33, $00, $24
-                      .text  $24, $00, $33, $33, $00, $00, $00, $00, $00, $00, $00, $00, $33, $33, $00, $24
-                      .text  $24, $00, $33, $33, $00, $00, $00, $00, $00, $00, $00, $00, $33, $33, $00, $24
-                      .text  $24, $00, $33, $33, $00, $00, $00, $00, $00, $00, $00, $00, $33, $33, $00, $24
-                      .text  $24, $00, $33, $33, $00, $00, $00, $00, $00, $00, $00, $00, $33, $33, $00, $24
-                      .text  $24, $00, $33, $33, $00, $00, $00, $00, $00, $00, $00, $00, $33, $33, $00, $24
-                      .text  $24, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24
-;
-;
-TILE_TEST_CH02        .text  $24, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24
-                      .text  $24, $55, $55, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $55, $55, $24
-                      .text  $24, $00, $55, $55, $00, $00, $00, $00, $00, $00, $00, $00, $55, $55, $00, $24
-                      .text  $24, $00, $00, $55, $55, $00, $00, $00, $00, $00, $00, $55, $55, $00, $00, $24
-                      .text  $24, $00, $00, $00, $55, $55, $00, $00, $00, $00, $55, $55, $00, $00, $00, $24
-                      .text  $24, $00, $00, $00, $00, $55, $55, $00, $00, $55, $55, $00, $00, $00, $00, $24
-                      .text  $24, $00, $00, $00, $00, $00, $55, $55, $55, $55, $00, $00, $00, $00, $00, $24
-                      .text  $24, $00, $00, $00, $00, $00, $00, $55, $55, $00, $00, $00, $00, $00, $00, $24
-                      .text  $24, $00, $00, $00, $00, $00, $55, $55, $55, $55, $00, $00, $00, $00, $00, $24
-                      .text  $24, $00, $00, $00, $00, $55, $55, $00, $00, $55, $55, $00, $00, $00, $00, $24
-                      .text  $24, $00, $00, $00, $55, $55, $00, $00, $00, $00, $55, $55, $00, $00, $00, $24
-                      .text  $24, $00, $00, $55, $55, $00, $00, $00, $00, $00, $00, $55, $55, $00, $00, $24
-                      .text  $24, $00, $55, $55, $00, $00, $00, $00, $00, $00, $00, $00, $55, $55, $00, $24
-                      .text  $24, $55, $55, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $55, $55, $24
-                      .text  $24, $55, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $55, $24
-                      .text  $24, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24, $24
-
-
-
-
-* = $1A0000
-TILE0_MAP
-.binary "Graphics/TILE1.data.bin", 0, 65536
-* = $1B0000
-TILE0_PALETTE
-.binary "Graphics/TILE1.data.pal.bin"        ;simple include, all bytes
-JUMPMAN_SPRITES
-JUMPMAN_SPRITES0
-.binary "Graphics/All_Letter_Sprites1.data.bin"
-JUMPMAN_SPRITES1
-.binary "Graphics/All_Letter_Sprites2.data.bin"
-JUMPMAN_SPRITES2
-.binary "Graphics/All_Letter_Sprites3.data.bin"
-JUMPMAN_SPRITES3
-.binary "Graphics/All_Letter_Sprites4.data.bin"
-JUMPMAN_SPRITES4
-.binary "Graphics/All_Letter_Sprites5.data.bin"
-JUMPMAN_SPRITES5
-.binary "Graphics/All_Letter_Sprites6.data.bin"
-JUMPMAN_SPRITES6
-.binary "Graphics/All_Letter_Sprites7.data.bin"
-JUMPMAN_SPRITES7
-.binary "Graphics/All_Letter_Sprites8.data.bin"
-JUMPMAN_SPRITES8
-.binary "Graphics/All_Letter_Sprites9.data.bin"
-JUMPMAN_SPRITES9
-.binary "Graphics/All_Letter_Sprites10.data.bin"
-JUMPMAN_SPRITES10
-.binary "Graphics/All_Letter_Sprites11.data.bin"
-JUMPMAN_SPRITES11
-.binary "Graphics/All_Letter_Sprites12.data.bin"
-JUMPMAN_SPRITES12
-.binary "Graphics/All_Letter_Sprites13.data.bin"
-JUMPMAN_SPRITES13
-.binary "Graphics/All_Letter_Sprites14.data.bin"
-JUMPMAN_SPRITES14
-.binary "Graphics/All_Letter_Sprites15.data.bin"
-JUMPMAN_SPRITES15
-.binary "Graphics/All_Letter_Sprites16.data.bin"
-JUMPMAN_SPRITES16
-.binary "Graphics/All_Letter_Sprites17.data.bin"
-.align 256
-TILE_MAP_CONTENT0
-                      .text  $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00,	$00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00,	$00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-                      .text  $00, $00, $00, $00, $00, $00, $00, $00,	$00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00,	$00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00,	$00, $00, $00, $00, $00, $00, $00, $00
-                      .text  $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00,	$00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-                      .text  $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00,	$00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00,	$00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-                      .text  $00, $00, $00, $00, $00, $00, $00, $00,	$00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00,	$00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00,	$00, $00, $00, $00, $00, $00, $00, $00
-                      .text  $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00,	$00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $63, $64, $65, $66, $00, $00, $00, $00, $00, $00, $00, $00,	$00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-                      .text  $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $87, $88, $89,	$8A, $8B, $0E, $00, $73, $74, $75, $76, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00,	$00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-                      .text  $00, $00, $00, $00, $00, $00, $00, $00,	$00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $97, $98, $99, $9A, $9B, $1E, $1F, $00, $59, $5A, $00,	$00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00,	$00, $00, $00, $00, $00, $00, $00, $00
-                      .text  $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $83, $84,	$85, $00, $00, $00, $00, $A7, $A8, $A9, $AA, $AB, $2E, $00, $5B, $5C, $5D, $5E, $00, $00, $00, $00, $00, $00, $00, $00,	$00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-                      .text  $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $93, $94, $95, $00, $00, $00, $B6, $B7, $B8, $B9,	$BA, $BB, $3E, $00, $67, $68, $69, $6A, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00,	$00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-                      .text  $01, $01, $05, $06, $01, $01, $01, $01,	$01, $01, $01, $01, $01, $01, $A3, $A4, $A5, $01, $01, $01, $C6, $C7, $C8, $C9, $CA, $CB, $4E, $01, $6B, $6C, $6D, $6E,	$01, $01, $01, $01, $05, $06, $01, $01, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00,	$00, $00, $00, $00, $00, $00, $00, $00
-                      .text  $00, $00, $03, $04, $00, $02, $00, $00, $02, $00, $00, $00, $02, $00, $02, $00,	$08, $00, $02, $02, $00, $00, $02, $02, $00, $00, $00, $00, $00, $00, $00, $02, $00, $02, $00, $00, $03, $04, $00, $00,	$00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-                      .text  $00, $00, $03, $04, $00, $02, $00, $00, $02, $00, $00, $00, $02, $00, $86, $00, $08, $00, $0A, $0B, $00, $00, $02, $02,	$00, $00, $00, $00, $00, $00, $00, $02, $00, $02, $00, $00, $03, $04, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00,	$00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-                      .text  $00, $00, $03, $04, $00, $02, $00, $00,	$14, $00, $00, $00, $02, $00, $96, $00, $08, $00, $1A, $1B, $39, $00, $02, $02, $00, $00, $00, $00, $00, $00, $00, $02,	$00, $02, $00, $00, $03, $04, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00,	$00, $00, $00, $00, $00, $00, $00, $00
-                      .text  $00, $00, $03, $04, $00, $02, $00, $00, $24, $15, $43, $17, $27, $00, $A6, $00,	$08, $00, $2A, $2B, $49, $00, $02, $02, $00, $60, $61, $62, $00, $00, $00, $8C, $00, $02, $00, $00, $03, $04, $00, $00,	$00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-                      .text  $00, $00, $03, $04, $10, $11, $12, $13, $34, $25, $53, $27, $28, $19, $00, $00, $08, $00, $0C, $0D, $00, $3A, $3B, $3C,	$3D, $70, $71, $72, $00, $EB, $EC, $9C, $00, $02, $00, $00, $03, $04, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00,	$00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-                      .text  $00, $00, $03, $04, $20, $21, $22, $23,	$44, $35, $00, $37, $38, $29, $00, $00, $08, $00, $1C, $1D, $00, $50, $00, $00, $51, $80, $81, $82, $00, $FB, $FC, $8D,	$8E, $8F, $00, $00, $03, $04, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00,	$00, $00, $00, $00, $00, $00, $00, $00
-                      .text  $00, $00, $03, $04, $30, $31, $32, $33, $54, $45, $16, $47, $48, $00, $00, $00,	$08, $00, $2C, $2D, $00, $4A, $4B, $4C, $4D, $90, $91, $92, $00, $00, $AC, $9D, $9E, $9F, $00, $00, $03, $04, $00, $00,	$00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-                      .text  $00, $00, $03, $04, $40, $41, $42, $00, $00, $55, $56, $57, $58, $00, $00, $00, $08, $00, $00, $00, $00, $00, $77, $78,	$00, $A0, $A1, $A2, $00, $00, $BC, $AD, $AE, $AF, $00, $00, $03, $04, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00,	$00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-                      .text  $00, $00, $03, $04, $00, $00, $00, $00,	$00, $00, $00, $00, $00, $00, $00, $00, $08, $00, $00, $00, $00, $00, $79, $7A, $00, $00, $52, $00, $00, $00, $CC, $BD,	$BE, $BF, $00, $00, $03, $04, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00,	$00, $00, $00, $00, $00, $00, $00, $00
-                      .text  $00, $00, $03, $04, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00,	$08, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $DC, $CD, $CE, $CF, $4F, $00, $03, $04, $00, $00,	$00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-                      .text  $00, $00, $03, $04, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00,	$00, $00, $00, $00, $00, $00, $00, $DD, $DE, $DF, $5F, $00, $03, $04, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00,	$00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-                      .text  $00, $00, $03, $04, $00, $00, $00, $00,	$00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $ED,	$EE, $EF, $6F, $00, $03, $04, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00,	$00, $00, $00, $00, $00, $00, $00, $00
-                      .text  $00, $00, $03, $04, $00, $00, $00, $00, $00, $00, $00, $00, $00, $B0, $B1, $00,	$00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $FD, $FE, $FF, $00, $00, $03, $04, $00, $00,	$00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-                      .text  $00, $00, $03, $04, $00, $00, $00, $00, $00, $00, $00, $00, $00, $C0, $C1, $C2, $C3, $C4, $00, $00, $00, $00, $00, $00,	$00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $03, $04, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00,	$00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-                      .text  $00, $00, $03, $04, $00, $00, $00, $00,	$00, $00, $00, $00, $00, $D0, $D1, $D2, $D3, $D4, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $D5, $D6, $D7, $D8,	$D9, $DA, $00, $00, $03, $04, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00,	$00, $00, $00, $00, $00, $00, $00, $00
-                      .text  $00, $00, $03, $04, $00, $00, $00, $00, $00, $00, $00, $00, $00, $E0, $E1, $E2,	$E3, $E4, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $E5, $E6, $E7, $E8, $E9, $EA, $00, $00, $03, $04, $00, $00,	$00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-                      .text  $01, $01, $05, $06, $01, $01, $01, $01, $01, $01, $01, $01, $3F, $F0, $F1, $F2, $F3, $F4, $B2, $01, $01, $01, $01, $01,	$01, $01, $01, $01, $F5, $F6, $F7, $F8, $F9, $FA, $01, $01, $05, $06, $01, $01, $00, $00, $00, $00, $00, $00, $00, $00,	$00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00
-                      .text  $00, $00, $00, $00, $00, $00, $00, $00,	$00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00, $00,	$00, $00, $00, $00, $00, $00, $00, $00
+* = $1FF000
+FONT_4_BANK0
+.binary "FONT/CBM-ASCII_8x8.bin", 0, 2048
