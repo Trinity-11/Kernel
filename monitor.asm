@@ -31,11 +31,12 @@ MPARSE          JML IMPARSE
 MPARSE1         JML IMPARSE1
 MEXECUTE        JML IMEXECUTE
 MASSEMBLE       JML IMASSEMBLE
-MASSEMBLEA      JML IMASSEMBLEA
+MRMODIFY        JML IMRMODIFY
 MCOMPARE        JML IMCOMPARE
 MDISASSEMBLE    JML IMDISASSEMBLE
 MFILL           JML IMFILL
 
+MGO             JML IMGO
 MJUMP           JML IMJUMP
 MHUNT           JML IMHUNT
 MLOAD           JML IMLOAD
@@ -83,7 +84,7 @@ IMREADY         ;set the READY handler to jump here instead of BASIC
                 JML IMSTATUS
 
 ;
-; IMSTATUS
+; IMREGISTERS
 ; Prints the regsiter status
 ; Reads the saved register values at CPU_REGISTERS
 ;
@@ -92,13 +93,16 @@ IMREADY         ;set the READY handler to jump here instead of BASIC
 ;
 ; Arguments: none
 ; Modifies: A,X,Y
-IMSTATUS        ; Print the MONITOR prompt (registers header)
+IMREGISTERS     ; Print the MONITOR prompt (registers header)
                 setdbr `mregisters_msg
                 LDX #<>mregisters_msg
                 JSL IPRINT
 
                 setas
                 LDA #';'
+                JSL IPUTC
+
+                LDA #' '
                 JSL IPUTC
 
                 setaxl
@@ -161,7 +165,9 @@ IMSTATUS        ; Print the MONITOR prompt (registers header)
                 PLP
 
                 JSL IPRINTCR
+                RTL
 
+IMSTATUS        JSL IMREGISTERS
                 JML IREADYWAIT
 
 ;
@@ -564,6 +570,489 @@ continue        JMP dump_line
                 .dpage 0
                 .pend
 
+;
+; Copy bytes from the arguments list to MLINEBUF
+;
+; Inputs:
+;   A = number of arguments to copy
+;   X = address of starting argument to copy
+;   Y = address of destination
+;
+M_COPY_ARGB     .proc
+                PHP
+
+                STA MTEMP
+
+                setas
+loop            LDA #0,B,X
+                STA #0,B,Y      ; Copy the byte
+                
+                LDA MTEMP       ; Check the count of characters remaining
+                BEQ done        ; If it's 0, we're done
+
+                INY             ; Point to the next destination byte
+
+                INX             ; Point to the next source byte (skip three bytes)
+                INX
+                INX
+                INX
+
+                DEC MTEMP       ; Count down and see if we're done
+                BRA loop
+
+done            PLP
+                RTL
+                .pend
+
+;
+;>     MODIFY       Start Byte [Byte]...
+;
+; Inputs:
+;   MARG1 = address to update
+;   MARG2..MARG9 = bytes to write
+;
+; Author:
+;   PJW
+;
+IMMODIFY        .proc
+                PHP
+                PHD
+                PHB
+
+                setdp <>MONITOR_VARS
+                setdbr 0
+
+                setaxl
+                LDA MARG1           ; Set MCURSOR to MARG1
+                STA MCURSOR
+                LDA MARG1+2
+                STA MCURSOR+2
+
+                setas              
+                LDA MARG_LEN        ; Set MCOUNT to the number of bytes in the pattern
+                DEC A               ; (MARG_LEN - 1)
+                STA MCOUNT
+
+                LDX #<>MARG2        ; Copy MCOUNT bytes from MARG2..MARG9
+                LDY #<>MLINEBUF     ; to MLINEBUF
+                JSL M_COPY_ARGB
+
+                LDY #0
+loop            LDA MLINEBUF,Y      ; Copy the byte from the buffer
+                STA [MCURSOR]       ; To the address indicated by MCURSOR
+
+                JSL M_INC_CURSOR    ; Advance the cursor
+                INY                 ; Go to the next buffered byte
+                CPY MCOUNT          ; Did we just write the last one?
+                BNE loop            ; No: continue writing
+
+                PLB
+                PLD
+                PLP
+                RTL
+                .pend
+
+;
+; Find a value in memory
+;
+; Inputs:
+;   MARG1 = starting address to scan
+;   MARG2 = ending address to scan
+;   MARG3 .. MARG9 = bytes to find (one byte per argument)
+;   MARG_LEN = numbe of arguments passed (number of bytes to find + 2)
+;
+; Author:
+;   PJW
+;
+IMHUNT          .proc
+                PHP
+                PHD
+                PHB
+
+                setdp <>MONITOR_VARS
+                setdbr 0
+
+                setas          
+                setxl     
+                LDA MARG_LEN        ; Set MCOUNT to the number of bytes in the pattern
+                DEC A               ; (MARG_LEN - 2)
+                DEC A
+                STA MCOUNT
+
+                LDX #<>MARG3
+                LDY #<>MLINEBUF
+                JSL M_COPY_ARGB
+
+                setal
+                LDA MARG1           ; Copy starting address to MCURSOR
+                STA MCURSOR
+                LDA MARG1+2
+                STA MCURSOR+2
+
+outer_loop      setal
+                LDA MCURSOR+2      ; If MCURSOR < MARG2, we're not done yet
+                CMP MARG2+2
+                BNE not_done
+                LDA MCURSOR
+                CMP MARG2
+                BEQ done            ; MCURSOR = MARG2: we're done
+
+not_done        setas
+                LDY #0
+
+cmp_loop        LDA [MCURSOR],Y     ; Get the byte from the memory to check
+                CMP MLINEBUF,Y      ; Compare it against our pattern
+                BNE advance         ; If not equal, we need to move on
+                INY                 ; Otherwise do we have more bytes to check?
+                CPY MCOUNT
+                BNE cmp_loop        ; No: check more
+
+                setal               ; Yes: we have a match!
+                LDA MCURSOR         ; Print the address
+                STA MTEMP
+                LDA MCURSOR+2
+                STA MTEMP+2
+                JSL M_PR_ADDR
+
+                setas               ; Print a space
+                LDA #' '
+                JSL IPUTC
+
+advance         JSL M_INC_CURSOR    ; Move MCURSOR forward by one
+                BRA outer_loop      ; And try to compare that to the pattern                
+
+done            JSL IPRINTCR
+                PLB
+                PLD
+                PLP
+                RTL
+                .pend
+
+;
+; Execute from specified address
+;
+; Inputs:
+;   MARG1 = address (optional)
+;
+; Author:
+;   PJW
+;
+IMJUMP          setdp MONITOR_VARS
+
+                setas
+                LDA MARG_LEN        ; Check to see if an argument was provided
+                BEQ MJUMPRESTORE    ; If not, just restore the registers
+
+                setaxl
+                LDA MARG1           ; Otherwise, replace PC and K
+                STA @lCPUPC         ; With the value of the first argument
+                LDA MARG1+2
+                STA @lCPUPBR
+
+MJUMPRESTORE    LDA @lCPUX          ; Restore X and Y
+                TAX
+                LDA @lCPUY
+                TAY
+
+                LDA @lCPUSTACK      ; Restore the stack pointer
+                TCS
+
+                LDA @lCPUDP         ; Restore the direct page register
+                TCD
+
+                setas               ; Push the return address to return to the monitor
+                LDA #`MJUMPSTART
+                PHA
+                LDA #>MJUMPSTART
+                PHA
+                LDA #<MJUMPSTART
+                PHA
+                JMP MGOSTACK        ; And push remaining registers and restart execution
+
+MJUMPSTART      NOP                 ; RTL increments PC pulled from stack, NOP leaves space for that
+                JML MONITOR
+
+;
+; Execute from specified address
+;
+; Inputs:
+;   MARG1 = address (optional)
+;
+; Author:
+;   PJW
+;
+IMGO            setdp MONITOR_VARS
+
+                setas
+                LDA MARG_LEN        ; Check to see if an argument was provided
+                BEQ MJUMPRESTORE    ; If not, just restore the registers
+
+                setaxl
+                LDA MARG1           ; Otherwise, replace PC and K
+                STA @lCPUPC         ; With the value of the first argument
+                LDA MARG1+2
+                STA @lCPUPBR
+
+MGORESTORE      LDA @lCPUX          ; Restore X and Y
+                TAX
+                LDA @lCPUY
+                TAY
+
+                LDA @lCPUSTACK      ; Restore the stack pointer
+                TCS
+
+                LDA @lCPUDP         ; Restore the direct page register
+                TCD
+
+MGOSTACK        setas
+                LDA @lCPUDBR        ; Restore the data bank register
+                PHA
+                PLB
+
+                LDA #$5C            ; Save the JSL opcode
+                STA @lMJUMPINST
+                LDA @lCPUPBR        ; Write PBR
+                STA @lMJUMPADDR+2
+                LDA @lCPUPC+1       ; Write PCH
+                STA @lMJUMPADDR+1
+                LDA @lCPUPC         ; Write PCL
+                STA @lMJUMPADDR
+                LDA @lCPUFLAGS      ; Push processor status
+                PHA
+
+                setal
+                LDA @lCPUA          ; Restore A
+                PLP                 ; And the status register
+
+                JML MJUMPINST       ; And jump to the target address
+
+;
+;C     COMPARE      Start1 Start2 [Len (1 if blank)]
+;
+; Inputs:
+;   MARG1 = Starting Address 1
+;   MARG2 = Starting Address 2
+;   MARG3 = Number of bytes to compare (default: 1)
+;
+; Author:
+;   PJW
+;
+IMCOMPARE       .proc
+                PHP
+                PHD
+                PHB
+
+                setdbr `MERRARGS
+                setdp MONITOR_VARS
+
+                setxl
+                setas
+                LDA MARG_LEN                ; Check the number of arguments provided
+                CMP #2
+                BEQ default_len             ; If 2: set MCOUNT to default of 1
+                CMP #3
+                BNE bad_arguments           ; Otherwise, if not 3: print an error
+
+                setal
+                LDA MARG3                   ; If 3: set MCOUNT to MARG3
+                STA MCOUNT
+                BRA compare
+
+default_len     setal
+                LDA #1                      ; No length was provided, set MCOUNT to 1
+                STA MCOUNT
+                BRA compare
+
+bad_arguments   LDX #<>MERRARGS             ; The wrong number of arguments was provided
+                JSL IPRINTS                 ; Print an error
+                BRA done
+
+compare         LDA MARG1                   ; Set MTEMP to MARG1
+                STA MTEMP
+                LDA MARG1+2
+                STA MTEMP+2
+
+                LDY #0
+loop            setas
+                LDA [MTEMP]                 ; Compare the byte at MTEMP
+                CMP [MARG2],Y               ; To the Yth byte from MARG2
+                BEQ continue                ; If they're the same, keep going
+
+mismatch        JSL M_PR_ADDR               ; If they're different, print MTEMP
+                LDA #' '
+                JSL IPUTC
+
+continue        setal
+                CLC                         ; Either way, increment MTEMP
+                LDA MTEMP
+                ADC #1
+                STA MTEMP
+                LDA MTEMP+2
+                ADC #0
+                STA MTEMP+2
+
+                INY                         ; Increment Y
+                CPY MCOUNT                  ; Try again unless we've checked MCOUNT bytes
+                BNE loop
+
+                JSL IPRINTCR           
+
+done            PLB
+                PLD
+                PLP
+                RTL
+                .pend
+
+;
+; Registers -- modify registers (showing registers is done by MSTATUS)
+; This should be called in response to the ';' command
+;
+;   PC     A    X    Y    SP   DBR DP   NVMXDIZC
+; ; 000000 0000 0000 0000 0000 00  0000 00000000
+;
+; Inputs:
+;   MARG1 = PC
+;   MARG2 = A
+;   MARG3 = X
+;   MARG4 = Y
+;   MARG5 = SP
+;   MARG6 = DBR
+;   MARG7 = DP
+;   MARG8 = Flags (parsed from binary)
+;
+; Author:
+;   PJW
+;
+IMRMODIFY       .proc
+                PHP
+                PHD
+                PHB
+
+                setdbr 0
+                setdp MONITOR_VARS
+
+                setas
+                LDA MARG_LEN        ; Check the number of arguments
+                BEQ done            ; 0? Just quit
+
+                LDX MARG1           ; Set the PC and PBR
+                STX #CPUPC,B
+                LDX MARG1+2
+                STX #CPUPBR,B
+
+                CMP #1              ; Check the number of arguments
+                BEQ done            ; 1? Just quit
+
+                LDX MARG2           ; Set A
+                STX #CPUA,B
+
+                CMP #2              ; Check the number of arguments
+                BEQ done            ; 2? Just quit
+
+                LDX MARG3           ; Set X
+                STX #CPUX,B
+
+                CMP #3              ; Check the number of arguments
+                BEQ done            ; 3? Just quit
+
+                LDX MARG4           ; Set Y
+                STX #CPUY,B
+
+                CMP #4              ; Check the number of arguments
+                BEQ done            ; 4? Just quit
+
+                LDX MARG5           ; Set SP
+                STX #CPUSTACK,B
+
+                CMP #5              ; Check the number of arguments
+                BEQ done            ; 5? Just quit
+
+                setxs
+                LDX MARG6           ; Set DBR
+                STX #CPUDBR,B
+
+                CMP #6              ; Check the number of arguments
+                BEQ done            ; 6? Just quit
+
+                setxl
+                LDX MARG7           ; Set DP
+                STX #CPUDP,B
+
+                CMP #7              ; Check the number of arguments
+                BEQ done            ; 7? Just quit
+
+                setxs
+                LDX MARG8           ; Set flags
+                STX #CPUFLAGS,B   
+
+done            PLB
+                PLD
+                PLP
+                RTL
+                .pend
+
+;
+; Execute the current command line (requires MCMD and MARG1-MARG8 to be populated)
+;
+; Inputs:
+;   MCMD = the command (single letter) to execute
+;   MARG1..MARG9 = the arguments provided to the command
+;   MARG_LEN = the number of arguments passed
+;
+IMEXECUTE       .proc
+                PHP
+                PHD
+                PHB
+
+                setdbr `IMEXECUTE
+                setdp MONITOR_VARS
+
+                setas
+                setxl
+
+                LDX #0
+loop            LDA MCOMMANDS,X         ; Get the Xth command key
+                BEQ not_found           ; Is it NUL? we should just return
+                CMP MCMD                ; Otherwise, is it the command?
+                BEQ found_cmd           ; Yes: we found the command
+
+                INX                     ; No: try the next one
+                BRA loop
+
+                ; Found the command...
+found_cmd       TXA                     ; Take the index
+                ASL A                   ; Multiply it by 2
+                TAX
+
+                PLB
+                PLD
+                PLP
+                JMP (cmd_dispatch,X)    ; And jump via that position in the index table
+
+cmd_dispatch    .word <>MASSEMBLE
+                .word <>MCOMPARE
+                .word <>MDISASSEMBLE
+                .word <>MFILL
+                .word <>MGO
+                .word <>MJUMP
+                .word <>MHUNT
+                .word <>MLOAD
+                .word <>MMEMORY
+                .word <>MREGISTERS
+                .word <>MRMODIFY
+                .word <>MSAVE
+                .word <>MTRANSFER
+                .word <>MVERIFY
+                .word <>MEXIT
+                .word <>MMODIFY
+                .word <>MDOS
+
+not_found       PLB
+                PLD
+                PLP
+                RTL
+                .pend
+
 .include "assembler.asm"
 
 ;
@@ -670,18 +1159,11 @@ continue        PLA
 IMRETURN        RTL ; Handle RETURN key (ie: execute command)
 IMPARSE         BRK ; Parse the current command line
 IMPARSE1        BRK ; Parse one word on the current command line
-IMEXECUTE       BRK ; Execute the current command line (requires MCMD and MARG1-MARG8 to be populated)
 IMASSEMBLEA     BRK ; Assemble a line of text.
-IMCOMPARE       BRK ; Compare memory. len=1
-IMGO            BRK ; Execute from specified address
-IMJUMP          BRK ; Execute from spefified address
-IMHUNT          BRK ; Hunt (find) value in memory
 IMLOAD          BRK ; Load data from disk. Device=1 (internal floppy) Start=Address in file
-IMREGISTERS     BRK ; View/edit registers
 IMSAVE          BRK ; Save memory to disk
 IMVERIFY        BRK ; Verify memory and file on disk
 IMEXIT          BRK ; Exit monitor and return to BASIC command prompt
-IMMODIFY        BRK ; Modify memory
 IMDOS           BRK ; Execute DOS command
 
 ;
@@ -689,5 +1171,7 @@ IMDOS           BRK ; Execute DOS command
 ; MONITOR messages and responses.
 MMESSAGES
 MMERROR         .text
+MERRARGS        .null "Bad arguments"
 
-mregisters_msg  .null $0D," PC     A    X    Y    SP   DBR DP   NVMXDIZC"
+mregisters_msg  .null $0D,"  PC     A    X    Y    SP   DBR DP   NVMXDIZC"
+MCOMMANDS       .null "ACDFGJHLMR;STVX>@"
