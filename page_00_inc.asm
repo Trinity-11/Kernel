@@ -74,38 +74,11 @@ D1_OPERAND_A     = $000110 ;2 Bytes Divider 1 Dividend ex: A in  A/B
 D1_OPERAND_B     = $000112 ;2 Bytes Divider 1 Divisor ex B in A/B
 D1_RESULT        = $000114 ;2 Bytes Signed quotient result of A/B ex: 7/2 = 3 r 1
 D1_REMAINDER     = $000116 ;2 Bytes Signed remainder of A/B ex: 1 in 7/2=3 r 1
-
-ADDER_SIGNED_32  = $000120
-ADDER32_A_LL     = $000120
-ADDER32_A_LH     = $000121
-ADDER32_A_HL     = $000122
-ADDER32_A_HH     = $000123
-ADDER32_B_LL     = $000124
-ADDER32_B_LH     = $000125
-ADDER32_B_HL     = $000126
-ADDER32_B_HH     = $000127
-ADDER32_R_LL     = $000128
-ADDER32_R_LH     = $000129
-ADDER32_R_HL     = $00012A
-ADDER32_R_HH     = $00012B
-
+; Reserved
+ADDER_SIGNED_32  = $000120 ; The 32 Bit Adders takes 12Byte that are NOT RAM Location
+; Reserved
 INT_CONTROLLER   = $000140 ; $000140...$00015F Interrupt Controller
-; Pending Interrupt (Read and Write Back to Clear)
-INT_PENDING_REG0 = $000140 ;
-INT_PENDING_REG1 = $000141 ;
-INT_PENDING_REG2 = $000142 ;
-; Polarity Set
-INT_POL_REG0     = $000144 ;
-INT_POL_REG1     = $000145 ;
-INT_POL_REG2     = $000146 ;
-; Edge Detection Enable
-INT_EDGE_REG0    = $000148 ;
-INT_EDGE_REG1    = $000149 ;
-INT_EDGE_REG2    = $00014A ;
-; Mask
-INT_MASK_REG0    = $00014C ;
-INT_MASK_REG1    = $00014D ;
-INT_MASK_REG2    = $00014E ;
+
 ; Interrupt Bit Definition
 ; Register Block 0
 FNX0_INT00_ALLONE = $01  ; Not Used - Always 1
