@@ -418,7 +418,7 @@ RETURN_IFAT12_GET_FAT_ENTRY
 
 ;-------------------------------------------------------------------------------
 ; Search for the file name in the root directory
-; Stack 0-1-3-4 pointer to the strings
+; Stack 0-1-3-4 pointer to the file name strings to load
 ; Stack 5-6-7-8 buffer where to load the file
 ;-------------------------------------------------------------------------------
 ILOAD_FILE

@@ -9,6 +9,7 @@ FDD_FIFO             = $AF13F5 ; Read/Write
 FDD_DIGITAL_INPUT    = $AF13F7 ; Read
 FDD_CONFIG_CTRL      = $AF13F7 ; Write
 
+;-------------------------------------------------------------------------------
 ; Status A : PS/2 Mode  (0xAF13F0)
 FFD_DIRECTION         = $01 ; "1" Head is moving inward direction, "0" it moving outward direction
 FDD_nWRITE_PROTECT    = $02 ; "0" protected / "1" unprotected
@@ -27,7 +28,7 @@ FDD_TRACK0            = $10 ; "1" => head at track 0
 ;FDD_STEP              = $20 ;
 FDD_DMA_REQUEST       = $40 ; "1" => DMA requeste pending
 ;FDD_INTERRUPT_PENDING = $80 ; "1" interrupt output is active
-
+;-------------------------------------------------------------------------------
 ; Status B PS/2 Mode (0xAF13F1)
 FDD_MOTOR_ENABLE_0    = $01 ; "1" => motor enabled
 FDD_MOTOR_ENABLE_1    = $02 ; "1" => motor enabled
@@ -42,21 +43,21 @@ FDD_READ_DATA         = $08 ;
 FDD_WRITE_DATA        = $01 ;
 ;FDD_DRIVER_SELLECT_0  = $20 ;
 FDD_nDRIVE_SELLECT_1  = $40 ;
-
+;-------------------------------------------------------------------------------
 ; Digital Output Register (0xAF13F2)
 FDD_DRIVE_SEL         = $03
-FDD_nRESET            = $04
+FDD_nRESET            = $04 ; Set at 1 will reset the FDD write back 0 to reactivate it
 FDD_DMAEN             = $08 ; Set at 1 will active the DMA and interupt IF in PC/AT and Model 30 mode otherwise alreaddy active
 FDD_ENABLE_MOTOR_0    = $10
 FDD_ENABLE_MOTOR_1    = $20
-;FDD_ENABLE_MOTOR_2    = $40 ; not suported in the 47M10X
-;FDD_ENABLE_MOTOR_3    = $80 ; not suported in the 47M10X
-
+;FDD_ENABLE_MOTOR_2    = $40 ; not suported in the LPC47M10X
+;FDD_ENABLE_MOTOR_3    = $80 ; not suported in the LPC47M10X
+;-------------------------------------------------------------------------------
 ; Tape Drive Register  (0xAF13F3)
 FDD_TAPE_SEL          = $03
 FDD_FLOPPY_BOOT_DRIVE = $0C
 FDD_DRIVE_ID          = $30
-
+;-------------------------------------------------------------------------------
 ; Main Status Register (0xAF13F4 READ)
 FDD_DRIVER_BUSY       = $03
 FDD_CMD_BUSSY         = $10 ; set to "1" when a command is in progress
@@ -69,7 +70,9 @@ FDD_DATA_RATE         = $03
 FDD_PRE_COMP          = $1C
 FDD_LOW_POWER         = $40 ; write 1 to activeate
 FDD_SOFTWARE_RESET    = $80 ; write 1 to reset the controler , this bit will reset himself
-
+;-------------------------------------------------------------------------------
+; Data Register (0xAF13F5 READ)
+;-------------------------------------------------------------------------------
 ; Digital Input register (0xAF13F6 READ ONLY)
 FDD_nHIGH_ENSITY      = $01 ; "0" if 500Kbps or 1Mbps / "1" if 250 or 300Kpbs
 FDD_DRATE_SEL_PS2     = $06
@@ -77,11 +80,16 @@ FDD_DRATE_SEL_MODE_30 = $03
 FDD_NOPREC            = $04
 FDD_DMAEN_MODE_30     = $08
 FDD_DSKCHG            = $80 ; Disk Change state
-
+;-------------------------------------------------------------------------------
 ; Configuration Control Register (0xAF13F7 WRITE)
 FDD_DRATE_SEL         = $03
 ;FDD_NOPREC            = $04
 
+;-------------------------------------------------------------------------------
+;
+; Value send back by the controler afer executing command
+;
+;-------------------------------------------------------------------------------
 ; Status register 0
 FDD_ST0_DRIVE_SELLECT       = $03 ; give the curent sellected drive
 FDD_ST0_HEAD_ADDRESS        = $04
