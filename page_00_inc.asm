@@ -179,6 +179,9 @@ SDOS_FILE_NAME   = $000380 ; // Max of 128 Chars
 SDOS_BLK_BEGIN   = $000400 ; 512 Bytes to Store SD Card Incoming or Outcoming Block
 SDOS_BLK_END     = $0006FF ;
 
+; $00:0700 - $00:070F - Reserved for Serial I/O
+CURRUART         = $000700 ; 24-bit pointer to the current UART
+
 STEF_BLOB_BEGIN  = $000E00 ; Temp Buffer for Testing
 STEF_BLOB_END    = $000EFF ;
 
