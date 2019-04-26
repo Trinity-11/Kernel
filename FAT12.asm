@@ -321,7 +321,7 @@ FAT12_COMPUT_OFSET_IN_CLUSTER
                   ; PHA ; save it back again
                   LDA 1,S
                   AND #1
-                  cmp #0
+                  CMP #0
                   PLA ; get the fat entry
                   PHA ; save it back again
                   ; LDA 1,S note used because it affect the zero flag

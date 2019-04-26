@@ -1,11 +1,12 @@
 ; Register Address
-FDD_STATUS_A         = $AF13F0 ; Read
+FDD_STATUS_A         = $AF13F0 ; Read     use in with PS2 and PS2 mode 30 noly
 FDD_STATUS_B         = $AF13F1 ; Read
 FDD_DIGITAL_OUTPUT   = $AF13F2 ; Read/Write
 FDD_TAPE_DRIVER      = $AF13F3 ; Read/Write
 FDD_MAIN_STATUE      = $AF13F4 ; Read
 FDD_DATA_RATE_SELECT = $AF13F4 ; Write
 FDD_FIFO             = $AF13F5 ; Read/Write
+;RESERVED_REG        = $AF13F6 ; Reserved
 FDD_DIGITAL_INPUT    = $AF13F7 ; Read
 FDD_CONFIG_CTRL      = $AF13F7 ; Write
 
