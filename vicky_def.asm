@@ -327,6 +327,31 @@ VDMA_DST_ADDY_M         = $AF040D
 VDMA_DST_ADDY_H         = $AF040E
 VDMA_RESERVED_1         = $AF040F
 
+; Mouse Pointer Graphic Memory
+MOUSE_PTR_GRAP0_START    = $AF0500 ; 16 x 16 = 256 Pixels (Grey Scale) 0 = Transparent, 1 = Black , 255 = White
+MOUSE_PTR_GRAP0_END      = $AF05FF ; Pointer 0
+MOUSE_PTR_GRAP1_START    = $AF0600 ;
+MOUSE_PTR_GRAP1_END      = $AF06FF ; Pointer 1
+
+MOUSE_PTR_CTRL_REG_L    = $AF0700 ; Bit[0] Enable, Bit[1] = 0  ( 0 = Pointer0, 1 = Pointer1)
+MOUSE_PTR_CTRL_REG_H    = $AF0701 ;
+MOUSE_PTR_X_POS_L       = $AF0702 ; X Position (0 - 639) (Can only read now) Writing will have no effect
+MOUSE_PTR_X_POS_H       = $AF0703 ;
+MOUSE_PTR_Y_POS_L       = $AF0704 ; Y Position (0 - 479) (Can only read now) Writing will have no effect
+MOUSE_PTR_Y_POS_H       = $AF0705 ;
+MOUSE_PTR_BYTE0         = $AF0706 ; Byte 0 of Mouse Packet (you must write 3 Bytes)
+MOUSE_PTR_BYTE1         = $AF0707 ; Byte 1 of Mouse Packet (if you don't, then )
+MOUSE_PTR_BYTE2         = $AF0708 ; Byte 2 of Mouse Packet (state Machine will be jammed in 1 state)
+                                  ; (And the mouse won't work)
+C256F_MODEL_MAJOR       = $AF070B ;
+C256F_MODEL_MINOR       = $AF070C ;
+FPGA_DOR                = $AF070D ;
+FPGA_MOR                = $AF070E ;
+FPGA_YOR                = $AF070F ;
+
+;                       = $AF0800 ; the RTC is Here
+;                       = $AF1000 ; The SuperIO Start is Here
+;                       = $AF13FF ; The SuperIO Start is Here
 
 FG_CHAR_LUT_PTR         = $AF1F40
 BG_CHAR_LUT_PTR		      = $AF1F80

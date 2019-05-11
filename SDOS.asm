@@ -29,6 +29,17 @@ SDOS_EXEC     JML ISDOS_EXEC
 ; Affects:
 ;   None
 ISDOS_INIT    setas
+              LDA @lINT_PENDING_REG1  ; Read the Pending Register &
+              AND #~FNX1_INT07_SDCARD   ; Enable
+              STA @lINT_PENDING_REG1
+
+              ;LDA @lINT_POL_REG1
+              ;ORA #FNX1_INT07_SDCARD
+              ;STA @lINT_POL_REG1
+              ;LDA @lINT_MASK_REG1
+              ;AND #~FNX1_INT07_SDCARD   ; Enable
+              ;STA @lINT_MASK_REG1
+
               LDA #$06
               STA SDCARD_CMD
               JSR DLYCMD_2_DTA
@@ -86,8 +97,8 @@ ISDOS_DIR_TRF
               BRL ISDOS_MISS_FILE
 ISDOS_DIR_CONT0
 
-              LDX #<>sd_card_msg4         ; Print Screen the Message "FILE OPENED"
-              JSL IPRINT       ; print the first line
+;              LDX #<>sd_card_msg4         ; Print Screen the Message "FILE OPENED";
+;              JSL IPRINT       ; print the first line
 ISDOS_NEXT_ENTRY
               LDA #CH_CMD_RD_DATA0
               STA SDCARD_CMD
@@ -151,6 +162,7 @@ NO_SDCARD_PRESENT
               LDX #<>sd_no_card_msg
 ISDOS_DIR_DONE
               JSL IPRINT       ; print the first line
+              JSR SDOS_FILE_CLOSE
               ; There should be an Error Code Displayed here...
               RTL;
 ISDOS_DISPLAY_DOT
@@ -191,8 +203,8 @@ ISDOS_MOUNT_CARD
 ;              JSR ISDOS_CHK_CD            ; Check to See if a Card is present
 ;              BCC ISDOS_NO_CARD           ;
               setxl
-              LDX #<>sd_card_msg1         ; Print Screen the Message "Card Detected"
-              JSL IPRINT       ; print the first line
+              ;LDX #<>sd_card_msg1         ; Print Screen the Message "Card Detected"
+              ;JSL IPRINT       ; print the first line
 ;              LDA SDCARD_PRSNT_MNT        ; Load Presence Status
 ;              AND #$05
 ;              CMP #$05
@@ -211,8 +223,8 @@ TRY_MOUNT_AGAIN
               BNE TRY_MOUNT_AGAIN
               JMP SDCARD_ERROR_MOUNT
 ISDOS_MOUNTED ; The Card is already mounted
-              LDX #<>sd_card_msg2         ; Print Screen the Message "Card Detected"
-              JSL IPRINT       ; print the first line
+;              LDX #<>sd_card_msg2         ; Print Screen the Message "Card Detected"
+;              JSL IPRINT       ; print the first line
 
               LDA SDCARD_PRSNT_MNT
               AND #~SDCARD_PRSNT_MNTED
@@ -245,6 +257,14 @@ SDOS_FILE_OPEN
               JSR SDCARD_WAIT_4_INT   ; A Interrupt is Generated, so go polling it
               RTS
 
+SDOS_FILE_CLOSE
+              LDA #CH_CMD_FILE_CLOSE ;
+              STA SDCARD_CMD          ; Go Request to open the File
+              JSR DLYCMD_2_DTA
+              LDA #$00                ; FALSE
+              STA SDCARD_DATA         ; Store into the Data Register of the CH376s
+              JSR SDCARD_WAIT_4_INT   ; A Interrupt is Generated, so go polling it
+              RTS
 ; SDOS_SET_FILE_NAME
 ; Set the Filename to the Controller CH376D
 ; Inputs:
@@ -289,18 +309,39 @@ DLYDTA_2_DTA
 ;
 ; Outputs:
 ;   A = Interrupt Status
+;SDCARD_WAIT_4_INT
+;              setas             ; This is for security
+;              SEI                 ; There is no time out on this, so let's
+                                  ; make sure it is not going to be interrupted
+;SDCARD_BUSY_INT
+;              LDA SDCARD_CMD    ; Read Status of Interrupt and
+;              AND #$80          ; Bit[7] = !INT if Zero = Busy
+;              CMP #$80          ;
+;              BEQ SDCARD_BUSY_INT
+;              CLI
+              ; Fetch the Status
+;              JSR DLYCMD_2_DTA ;
+;              JSR DLYCMD_2_DTA ;
+;              LDA #CH_CMD_GET_STATUS
+;              STA SDCARD_CMD;
+;              JSR DLYCMD_2_DTA;   ; 1.5us Delay to get the Value Return
+;              LDA SDCARD_DATA;
+;              RTS           ;
+
 SDCARD_WAIT_4_INT
               setas             ; This is for security
-              SEI                 ; There is no time out on this, so let's
-                                  ; make sure it is not going to be interrupted
+;              SEI                 ; There is no time out on this, so let's
+                                                ; make sure it is not going to be interrupted
+;              LDA @lINT_PENDING_REG1  ; Read the Pending Register &
+;              AND #$7F   ; Enable
+;              STA @lINT_PENDING_REG1
 SDCARD_BUSY_INT
-              LDA SDCARD_CMD    ; Read Status of Interrupt and
-              AND #$80          ; Bit[7] = !INT if Zero = Busy
-              CMP #$80          ;
-              BEQ SDCARD_BUSY_INT
-              CLI
+              LDA @lINT_PENDING_REG1  ; Check to See if the Pending Register for the SD_INT is Set
+              AND #FNX1_INT07_SDCARD  ;
+              CMP #FNX1_INT07_SDCARD
+              BNE SDCARD_BUSY_INT   ; Go Check again to see if it is checked
+              STA @lINT_PENDING_REG1    ;Interrupt as occured, clear the Pending Register for next time.
               ; Fetch the Status
-SDCARD_BUSY_DONE
               JSR DLYCMD_2_DTA ;
               JSR DLYCMD_2_DTA ;
               LDA #CH_CMD_GET_STATUS
@@ -308,7 +349,6 @@ SDCARD_BUSY_DONE
               JSR DLYCMD_2_DTA;   ; 1.5us Delay to get the Value Return
               LDA SDCARD_DATA;
               RTS           ;
-;
 ; ISDOS_CHK_CD
 ; Return the Value of SD Card Present Status
 ; Inputs:
@@ -572,6 +612,6 @@ sd_card_msg1        .text "SDCARD DETECTED", $00
 sd_card_msg2        .text "SDCARD MOUNTED", $00
 sd_card_msg3        .text "FAILED TO MOUNT SDCARD", $0D, $00
 sd_card_msg4        .text "FILE OPENED", $0D, $00
-sd_card_msg5        .text "END OF FILE...", $00
+sd_card_msg5        .text "END OF LINE...", $00
 sd_card_msg6        .text "FILE FOUND, LOADING...", $00
 sd_card_msg7        .text "FILE LOADED", $00

@@ -1,18 +1,18 @@
 
 * = $193000
 
-;BCC is branch if less than; BCS is branch if greater than or equal.
-KEY_BUFFER       = $000F00 ;64 Bytes keyboard buffer
-KEY_BUFFER_SIZE  = $0080 ;128 Bytes (constant) keyboard buffer length
-KEY_BUFFER_END   = $000F7F ;1 Byte  Last byte of keyboard buffer
-;KEY_BUFFER_RPOS  = $000F80 ;2 Bytes keyboard buffer read position
-;KEY_BUFFER_WPOS  = $000F82 ;2 Bytes keyboard buffer write position
-KEY_BUFFER_CMD   = $000F83 ;1 Byte  Indicates the Command Process Status
-COMMAND_SIZE_STR = $000F84 ; 1 Byte
-COMMAND_COMP_TMP = $000F86 ; 2 Bytes
+;;BCC is branch if less than; BCS is branch if greater than or equal.
+;KEY_BUFFER       = $000F00 ;64 Bytes keyboard buffer
+;KEY_BUFFER_SIZE  = $0080 ;128 Bytes (constant) keyboard buffer length
+;KEY_BUFFER_END   = $000F7F ;1 Byte  Last byte of keyboard buffer
+;;KEY_BUFFER_RPOS  = $000F80 ;2 Bytes keyboard buffer read position
+;;KEY_BUFFER_WPOS  = $000F82 ;2 Bytes keyboard buffer write position
+;KEY_BUFFER_CMD   = $000F83 ;1 Byte  Indicates the Command Process Status
+;COMMAND_SIZE_STR = $000F84 ; 1 Byte
+;COMMAND_COMP_TMP = $000F86 ; 2 Bytes
 
-KEYBOARD_SC_FLG  = $000F87 ;1 Bytes that indicate the Status of Left Shift, Left CTRL, Left ALT, Right Shift
-KEYBOARD_SC_TMP  = $000F88 ;1 Byte, Interrupt Save Scan Code while Processing
+;KEYBOARD_SC_FLG  = $000F87 ;1 Bytes that indicate the Status of Left Shift, Left CTRL, Left ALT, Right Shift
+;KEYBOARD_SC_TMP  = $000F88 ;1 Byte, Interrupt Save Scan Code while Processing
 
 ;##########################################
 ;## Command Parser
@@ -76,9 +76,6 @@ GO_BACKTHEPOINTER
                 BEQ EXIT_SAVE2_CMDLINE
                 DEX
                 BRA EXIT_SAVE2_CMDLINE
-
-
-
 
 ;##########################################
 ;## Command Parser
@@ -145,7 +142,7 @@ ENDOFCOMMANDNOTFOUND
                 BEQ FOUNDTHEFOLLOWINGSPACE
                 INX
                 INY
-                CPY #$0010              ; Set the Maximum number of Character to 16
+                CPY #$0010              ; Set the Maximum number of Character to 16 in the command
                 BCC ENDOFCOMMANDNOTFOUND
 FOUNDTHEFOLLOWINGSPACE
                 PLX ; Get the Pointer Location of the First Character of the Command
@@ -194,6 +191,8 @@ NOTTHERIGHTSIZEMOVEON
                 ; at this point, the
                 STX CMD_PARSER_TMPX   ; Just to make sure, this is where the Pointer in the line buffer is...
                 INY   ; Point to after the $00, the next 2 bytes are the Attributes
+                LDA #$FF
+                STA CMD_VALID
                 LDA [CMD_PARSER_PTR], Y ;
                 STA CMD_ATTRIBUTE
                 INY
@@ -208,15 +207,25 @@ NOTTHERIGHTSIZEMOVEON
                 INY
                 LDA [CMD_PARSER_PTR], Y
                 STA CMD_EXEC_ADDY+2
-                JML [CMD_EXEC_ADDY]
 
+                LDX CMD_ATTRIBUTE
+                CPX #$0000
+                BEQ NO_ATTRIBUTE_GO_EXEC
+
+                JSR PROCESS_ARGUMENTS
+                LDA CMD_VALID
+                CMP #$FF
+                BEQ EXITWITHERROR       ; if Carry Set
+
+NO_ATTRIBUTE_GO_EXEC
+                setas
+                JML [CMD_EXEC_ADDY]
 
 COMMANDNOTFOUND
                 LDX #<>CMD_Error_Notfound
                 JSL IPRINT       ; print the first line
+EXITWITHERROR
                 RTS
-
-
 ; If we are here, it is because we have match in size and we have a point to one of the Command Structure Entry, so let's see if it matches the LinebUffer
 
 ; Check the Structure Entry for the Name of the Command , if the calls exits with Zero than, the Command was Found
@@ -243,35 +252,294 @@ SUCCESSFOUNDCOMMAND ; If Success, it will return 00
                 RTS
 
 
+PROCESS_ARGUMENTS
+                setaxl  ; Just making sure X/Y and A are 16bit wide right now
+                ; before we can process the Attributes we need to know, which one that needs to be done
+                LDX CMD_PARSER_TMPX ; This is the Pointer after the command
+                JSR MOVE_POINTER_2_ARG  ; If there is supposed to be a parameter, this will go and fetch the next valid char
+                BCC ATTRIBUTE_2_PROCESS
+                setas
+                RTS
+                ; IF there is no Error let's load the Attribu
+ATTRIBUTE_2_PROCESS
+                setal
+                LDA CMD_ATTRIBUTE
+; Find the Device
+                AND #CMD_ARGTYPE_DEV    ; This is to know, if it is for a Flppy or for the SDCard
+                CMP #CMD_ARGTYPE_DEV
+                BNE NOT_CMD_ARGTYPE_DEV ; Device Type @S, @F, @C, @P
+                JSR FIND_CMD_ARGTYPE_DEV
+                BCC NOT_CMD_ARGTYPE_DEV
+                setas
+                RTS
+; Find the Filename
+NOT_CMD_ARGTYPE_DEV
+                setal
+                LDA CMD_ATTRIBUTE
+                AND #CMD_ARGTYPE_FN
+                CMP #CMD_ARGTYPE_FN
+                BNE NOT_CMD_ARGTYPE_FN
+                JSR FIND_CMD_ARGTYPE_FN ; File Name
+                BCC NOT_CMD_ARGTYPE_FN
+                setas
+                RTS
+
+; Find the Starting Address
+NOT_CMD_ARGTYPE_FN
+                setal
+                LDA CMD_ATTRIBUTE
+                AND #CMD_ARGTYPE_SA
+                CMP #CMD_ARGTYPE_SA
+                BNE NOT_CMD_ARGTYPE_SA; Starting Address (Source)
+                JSR FIND_CMD_ARGTYPE_SA
+
+; Find the Ending Address
+NOT_CMD_ARGTYPE_SA
+                setal
+                LDA CMD_ATTRIBUTE
+                AND #CMD_ARGTYPE_EA
+                CMP #CMD_ARGTYPE_EA
+                BNE NOT_CMD_ARGTYPE_EA ; Ending Address (Destination)
+                JSR FIND_CMD_ARGTYPE_EA
+
+; Find 8bit Data
+NOT_CMD_ARGTYPE_EA
+                setal
+                LDA CMD_ATTRIBUTE
+                AND #CMD_ARGTYPE_8D
+                CMP #CMD_ARGTYPE_8D
+                BNE NOT_CMD_ARGTYPE_8D
+                JSR FIND_CMD_ARGTYPE_8D ; 8bits Data
+
+NOT_CMD_ARGTYPE_8D
+                setal
+                LDA CMD_ATTRIBUTE
+                AND #CMD_ARGTYPE_16D
+                CMP #CMD_ARGTYPE_16D
+                BNE NOT_CMD_ARGTYPE_16D
+                JSR FIND_CMD_ARGTYPE_16D; 16bit Data
+
+NOT_CMD_ARGTYPE_16D
+                setal
+                LDA CMD_ATTRIBUTE
+                AND #CMD_ARGTYPE_TIM
+                CMP #CMD_ARGTYPE_TIM
+                BNE NOT_CMD_ARGTYPE_TIM
+                JSR FIND_CMD_ARGTYPE_TIM ; Time HH:MM:SS
+
+NOT_CMD_ARGTYPE_TIM
+                setal
+                LDA CMD_ATTRIBUTE
+                AND #CMD_ARGTYPE_DAT
+                CMP #CMD_ARGTYPE_DAT
+                BNE NOT_CMD_ARGTYPE_DAT
+                JSR FIND_CMD_ARGTYPE_DAT ; DD/MM/YY, SAT
+
+NOT_CMD_ARGTYPE_DAT
+                setal
+                LDA CMD_ATTRIBUTE
+                AND #CMD_ARGTYPE_RGB
+                CMP #CMD_ARGTYPE_RGB
+                BNE NOT_CMD_ARGTYPE_RGB ; 24bit Data
+                JSR FIND_CMD_ARGTYPE_RGB;
+
+NOT_CMD_ARGTYPE_RGB
+                setal
+                LDA CMD_ATTRIBUTE
+                AND #CMD_ARGTYPE_FN2
+                CMP #CMD_ARGTYPE_FN2
+                BNE NOT_CMD_ARGTYPE_FN2 ; Second File Name
+                JSR FIND_CMD_ARGTYPE_FN2
+
+NOT_CMD_ARGTYPE_FN2
+                setal
+                LDA CMD_ATTRIBUTE
+                AND #CMD_ARGTYPE_DEC
+                CMP #CMD_ARGTYPE_DEC
+                BNE NO_ATTRIBUTE_2_PROCESS
+                JSR FIND_CMD_ARGTYPE_DEC
+
+NO_ATTRIBUTE_2_PROCESS
+                setas
+                LDA #$00
+                STA CMD_VALID
+                RTS
+
+MOVE_POINTER_2_ARG
+                setas
+MOVE_POINTER_2_NEXT_SPACE
+                LDA @lKEY_BUFFER, X     ; Fetch the first char
+                CMP #$0D
+                BEQ ERROR_PARAMETERMISSING
+                CMP #$20
+                BNE POINTER_POINTING_NOT_A_SPACE_EXIT
 
 
+                INX
+                CPX #$0030  ; If the Move Pointer gets
+                BCC MOVE_POINTER_2_NEXT_SPACE
+                BRA ERROR_PARAMETERMISSING
+
+POINTER_POINTING_NOT_A_SPACE_EXIT
+                STX CMD_PARSER_TMPX
+                setal
+                CLC
+                RTS
+;
+ERROR_PARAMETERMISSING
+                setal
+                LDX #<>CMD_Error_Missing
+                JSL IPRINT       ; print the first line
+                SEC
+                RTS
+
+;
+ERROR_WRONGDEVICE
+                setal
+                LDX #<>CMD_Wrong_Device
+                JSL IPRINT       ; print the first line
+                SEC
+                RTS
+;S
+;///////////////////////////////////////////////////////////////////////
+;// Arguments Process
+;//
+;/
+;/////////////////////////////////////////////////////////////////////
+; Find the Device that the command wants to Target
+FIND_CMD_ARGTYPE_DEV
+                setas
+                LDA @lKEY_BUFFER, X     ; Fetch the first char
+                CMP #'@'
+                BNE ERROR_PARAMETERMISSING
+                INX
+                LDA @lKEY_BUFFER, X     ; Fetch the first char
+                CMP #'S'                ; Is it
+                BEQ SDCARD_CHOICE
+                CMP #'F'
+                BNE ERROR_WRONGDEVICE
+SDCARD_CHOICE
+                STA CMD_ARG_DEV
+                STX CMD_PARSER_TMPX
+                CLC
+                setal
+                RTS
+
+; Find the Filename that the command wants to target
+FIND_CMD_ARGTYPE_FN
+                LDX CMD_PARSER_TMPX
+                INX
+                JSR MOVE_POINTER_2_ARG  ; Check if there is a space after the parameter
+                setas
+                LDA @lKEY_BUFFER, X     ; Fetch the first char
+                CMP #','
+                BNE ERROR_PARAMETERMISSING
+                INX
+                JSR MOVE_POINTER_2_ARG  ; Check if there is a space after the parameter
+                setas
+                LDA @lKEY_BUFFER, X     ; Fetch the first char
+                CMP #'"'
+                BNE ERROR_PARAMETERMISSING
+                LDY #$0000
+                INX
+                LDA @lKEY_BUFFER, X     ; Fetch the first char
+                CMP #'"'
+                BEQ DONE_FILE_SAVE
+                STA SDOS_FILE_NAME,Y
+                INX
+                INY
+                CPY #$10
+                BNE
+DONE_FILE_SAVE
+
+                RTS
+
+; Find the Filename that the command wants to target
+FIND_CMD_ARGTYPE_SA
+                PHA
 
 
-; Will Setup the Pointer for the Name + its Size
-; Input:
-; Pointer To Argument
-PROC_FILENAME_ARG
-              RTS
+                setal
+                PLA
+                RTS
+;
+; Find the Filename that the command wants to target
+FIND_CMD_ARGTYPE_EA
+                PHA
 
 
-; Will Setup the Variable to the Device to Target
-PROC_DEVICE_ARG
-              RTS
+                setal
+                PLA
+                RTS
 
-; Will Transform the ASCII into a Hex value
-; This will specify an 24bits Address
-PROC_ADDRESS_ARG
-              RTS
-; Will Transform the ASCII into a Hex value
-; This will output a 8Bits Byte
-PROC_DATA8_ARG
-              RTS
-; Will Transform the ASCII into a Hex value
-; This will output a 16Bits Short
-PROC_DATA16_ARG
-              RTS
+; Find 8bit data ($00 to $FF)
+FIND_CMD_ARGTYPE_8D
+                PHA
+
+
+                setal
+                PLA
+                RTS
+;
+; Find 16bit data ($0000 to $FFFF)
+FIND_CMD_ARGTYPE_16D
+                PHA
+
+
+                setal
+                PLA
+                RTS
+
+;Find Time Parameters
+FIND_CMD_ARGTYPE_TIM
+                PHA
+
+
+                setal
+                PLA
+                RTS
+;
+;Find Date Parameters
+FIND_CMD_ARGTYPE_DAT
+                PHA
+
+
+                setal
+                PLA
+                RTS
+;Find RGB Argument 24bit Data
+FIND_CMD_ARGTYPE_RGB
+                PHA
+
+
+                setal
+                PLA
+                RTS
+;Second Filename
+FIND_CMD_ARGTYPE_FN2
+                PHA
+
+
+                setal
+                PLA
+                RTS
+;Find a Decimal Number
+FIND_CMD_ARGTYPE_DEC
+                PHA
+
+
+                setal
+                PLA
+                RTS
+;///////////////////////////////////////////////////////////////////////
+;// Commands Process
+;//
+;//
+;/////////////////////////////////////////////////////////////////////
 
 ENTRY_CMD_CLS
+              setas
+              setxl
               LDX #$0000		; Only Use One Pointer
               LDA #$20		; Fill the Entire Screen with Space
 CLEARSCREENL0	STA CS_TEXT_MEM_PTR, x	;
@@ -293,13 +561,31 @@ CLEARSCREENL1	STA CS_COLOR_MEM_PTR, x	;
               RTS
 
 ENTRY_CMD_DIR
-LDX #<>DIR_COMMAND
-JSL IPRINT       ; print the first line
+              LDX #<>DIR_COMMAND
+              JSL IPRINT       ; print the first line
+              LDA @lJOYSTICK2
+              AND #$80        ; Card Present when 1
+              BNE SDNOT_PRESENT;
+              ; If where are here, there is a Card inserted in the slot
+              LDA @lJOYSTICK3
+              AND #$80        ; Card WProtect When 0
+              BEQ SDNOT_WP;
+              LDX #<>CMD_Error_SD_WP
+              JSL IPRINT       ; print the first line
+SDNOT_WP
+              JSL ISDOS_INIT
+              JSL ISDOS_DIR
+              RTS
+SDNOT_PRESENT
+              LDX #<>CMD_Error_SD_NotPresent
+              JSL IPRINT       ; print the first line
+              RTS
+
 RTS
 
 ENTRY_CMD_EXEC
-LDX #<>EXEC_COMMAND
-JSL IPRINT       ; print the first line
+  LDX #<>EXEC_COMMAND
+  JSL IPRINT       ; print the first line
 RTS
 
 ENTRY_CMD_LOAD
@@ -315,8 +601,138 @@ ENTRY_CMD_POKE16    RTS
 ENTRY_CMD_PEEK16    RTS
 ENTRY_CMD_RECWAV    RTS
 ENTRY_CMD_EXECFNX   RTS
-ENTRY_CMD_GETDATE   RTS
-ENTRY_CMD_GETTIME   RTS
+ENTRY_CMD_GETDATE
+              setas
+              LDA @lRTC_DAY   ; Go Read the Hour Registers
+              PHA
+              AND #$30
+              LSR A
+              LSR A
+              LSR A
+              LSR A
+              ORA #$30
+              JSL IPUTC
+              PLA
+              AND #$0F
+              ORA #$30
+              JSL IPUTC
+              LDA #'/'
+              JSL IPUTC
+              LDA @lRTC_MONTH   ; Go Read the Min Registers
+              PHA
+              AND #$10
+              LSR A
+              LSR A
+              LSR A
+              LSR A
+              ADC #$30
+              JSL IPUTC
+              PLA
+              AND #$0F
+              ORA #$30
+              JSL IPUTC
+              LDA #'/'
+              JSL IPUTC
+              LDA @lRTC_YEAR   ; Go Read the Sec Registers
+              PHA
+              AND #$F0
+              LSR A
+              LSR A
+              LSR A
+              LSR A
+              ORA #$30
+              JSL IPUTC
+              PLA
+              AND #$0F
+              ORA #$30
+              JSL IPUTC
+              LDA #','
+              JSL IPUTC
+              ; Now let's display the DOW
+              LDA @lRTC_DOW
+              DEC A
+              ASL A
+              ASL A
+              TAX
+GO_PUTC_THE_DOW
+              LDA @lDOW,X
+              CMP #$00
+              BEQ DOW_IPUTC_DONE
+              INX
+              PHX
+              JSL IPUTC
+              PLX
+              BRA GO_PUTC_THE_DOW
+DOW_IPUTC_DONE
+              LDA #$0D
+              JSL IPUTC
+              RTS
+
+; This is the Command to go read the RTC Internal Registers and to Display them on the screen
+ENTRY_CMD_GETTIME
+              setas
+              LDA @lRTC_HRS   ; Go Read the Hour Registers
+              PHA
+              AND #$30
+              LSR A
+              LSR A
+              LSR A
+              LSR A
+              ORA #$30
+              JSL IPUTC
+              PLA
+              AND #$0F
+              ORA #$30
+              JSL IPUTC
+              LDA #':'
+              JSL IPUTC
+              LDA @lRTC_MIN   ; Go Read the Min Registers
+              PHA
+              AND #$70
+              LSR A
+              LSR A
+              LSR A
+              LSR A
+              ADC #$30
+              JSL IPUTC
+              PLA
+              AND #$0F
+              ORA #$30
+              JSL IPUTC
+              LDA #':'
+              JSL IPUTC
+              LDA @lRTC_SEC   ; Go Read the Sec Registers
+              PHA
+              AND #$F0
+              LSR A
+              LSR A
+              LSR A
+              LSR A
+              ORA #$30
+              JSL IPUTC
+              PLA
+              AND #$0F
+              ORA #$30
+              JSL IPUTC
+              LDA @lRTC_HRS
+              AND #$80
+              CMP #$80
+              BEQ AMFMCHOICE
+              LDA #'A'
+              JSL IPUTC
+              BRA GO_PUTC_THE_M
+AMFMCHOICE
+              LDA #'P'
+              JSL IPUTC
+GO_PUTC_THE_M
+              LDA #'M'
+              JSL IPUTC
+              LDA #$0D
+              JSL IPUTC
+RTS
+
+
+
 ENTRY_CMD_MONITOR   RTS
 ENTRY_CMD_PLAYRAD   RTS
 ENTRY_CMD_PLAYWAV   RTS
@@ -337,10 +753,8 @@ DIR       .text $03, "DIR", $00, CMD_ARGTYPE_DEV, ENTRY_CMD_DIR                 
 EXEC      .text $04, "EXEC", $00, CMD_ARGTYPE_SA, ENTRY_CMD_EXEC                                        ; EXEC S:$00000
 LOAD      .text $04, "LOAD", $00, (CMD_ARGTYPE_DEV | CMD_ARGTYPE_FN | CMD_ARGTYPE_EA), ENTRY_CMD_LOAD   ; "LOAD @F, "NAME.XXX", D:$000000
 SAVE      .text $04, "SAVE", $00, (CMD_ARGTYPE_DEV | CMD_ARGTYPE_FN | CMD_ARGTYPE_SA | CMD_ARGTYPE_EA), ENTRY_CMD_SAVE           ; SAVE @F, "NAME.XXX", S:$000000, D:$000000
-PEEK8     .text $05, "PEEK8", $00,  CMD_ARGTYPE_SA, ENTRY_CMD_PEEK8       ; PEEK8 $000000
-POKE8     .text $05, "POKE8", $00, (CMD_ARGTYPE_SA | CMD_ARGTYPE_8D), ENTRY_CMD_POKE8          ; POKE8 $000000, $00
-PEEK16    .text $06, "PEEK16", $00, CMD_ARGTYPE_SA, ENTRY_CMD_POKE16, ENTRY_CMD_PEEK16        ; PEEK16 $000000
-POKE16    .text $06, "POKE16", $00, (CMD_ARGTYPE_SA | CMD_ARGTYPE_16D), ENTRY_CMD_POKE16           ; POKE16 $000000, $0000
+PEEK8     .text $06, "PEEK8H", $00,  CMD_ARGTYPE_SA, ENTRY_CMD_PEEK8       ; PEEK8 $000000
+POKE8     .text $06, "POKE8H", $00, (CMD_ARGTYPE_SA | CMD_ARGTYPE_8D), ENTRY_CMD_POKE8          ; POKE8 $000000, $00
 RECWAV    .text $06, "RECWAV", $00, (CMD_ARGTYPE_DEV | CMD_ARGTYPE_FN) , ENTRY_CMD_RECWAV          ; RECWAV @S, "NAME.XXX" (Samples)
 EXECFNX   .text $07, "EXECFNX", $00, CMD_ARGTYPE_FN, ENTRY_CMD_EXECFNX        ; "EXECFNX "NAME.XXX"
 GETDATE   .text $07, "GETDATE", $00, CMD_ARGTYPE_NO, ENTRY_CMD_GETDATE       ; GETDATE
@@ -348,6 +762,8 @@ GETTIME   .text $07, "GETTIME", $00, CMD_ARGTYPE_NO, ENTRY_CMD_GETTIME        ; 
 MONITOR   .text $07, "MONITOR", $00, CMD_ARGTYPE_NO, ENTRY_CMD_MONITOR       ; MONITOR TBD
 PLAYRAD   .text $07, "PLAYRAD", $00, (CMD_ARGTYPE_DEV | CMD_ARGTYPE_FN), ENTRY_CMD_PLAYRAD        ; PLAYRAD @S, "NAME.XXX" (music File)
 PLAYWAV   .text $07, "PLAYWAV", $00, (CMD_ARGTYPE_DEV | CMD_ARGTYPE_FN), ENTRY_CMD_PLAYWAV                ; PLAYWAV @S, "NAME.XXX" (samples)
+PEEK16    .text $07, "PEEK16H", $00, CMD_ARGTYPE_SA, ENTRY_CMD_POKE16, ENTRY_CMD_PEEK16        ; PEEK16 $000000
+POKE16    .text $07, "POKE16H", $00, (CMD_ARGTYPE_SA | CMD_ARGTYPE_16D), ENTRY_CMD_POKE16           ; POKE16 $000000, $0000
 SETDATE   .text $07, "SETDATE", $00, CMD_ARGTYPE_DAT, ENTRY_CMD_SETDATE      ; SETDATE YY:MM:DD
 SETTIME   .text $07, "SETTIME", $00, CMD_ARGTYPE_TIM, ENTRY_CMD_SETTIME       ; SETTIME HH:MM:SS
 SYSINFO   .text $04, "SYSINFO", $00, CMD_ARGTYPE_NO, ENTRY_CMD_SYSINFO
@@ -374,12 +790,18 @@ CMD_ARGTYPE_RGB   = $0100 ; RGB Data (24Bit Data) for LUT mainly
 CMD_ARGTYPE_FN2   = $0200 ; Second File name
 CMD_ARGTYPE_DEC   = $0400 ; Decimal value
 
+DIR_COMMAND .text $0D, "@SDCARD:", $00
 CLS_COMMAND .text "CLS", $00
-DIR_COMMAND .text "DIR is happening...", $00
 EXEC_COMMAND .text "EXEC Command Executing...", $00
 LOAD_COMMAND .text "LOAD", $00
-CMD_Error_Syntax  .text "SYNTAX  ERROR", $00
-CMD_Error_Missing .text "Missing Parameters...", $00
+CMD_Error_Syntax  .text "E000 - SYNTAX ERROR", $00
+CMD_Error_Missing .text "E001 - MISSING PARAMETER(S)", $00
+CMD_Wrong_Device  .text "E002 - NO SUCH DEVICE EXISTS", $00
 CMD_Error_Wrong   .text "Wrong Parameters...", $00
-CMD_Error_Overrun .text "Buffer Overrun...", $00
-CMD_Error_Notfound .text "SYNTAX  ERROR", $00
+CMD_Error_Overrun .text "E004 BUFFER OVERRUN ERROR", $00
+CMD_Error_Notfound .text "SYNTAX ERROR", $00
+CMD_Error_SD_NotPresent .text "SDCARD NOT PRESENT", $00
+CMD_Error_SD_WP .text "SDCARD WP", $00
+
+; the Day of the Week must stay 4 Characters 3 Char + $00, or the routine won't work.
+DOW      .text "SUN", $00, "MON", $00, "TUE", $00, "WED", $00, "THU", $00, "FRI", $00, "SAT", $00

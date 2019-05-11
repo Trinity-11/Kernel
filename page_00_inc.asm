@@ -44,7 +44,13 @@ CMD_ATTRIBUTE    = $00004B ; <<< Command Parser 2 Bytes (16bits Attribute Field)
 CMD_EXEC_ADDY    = $00004D ; <<< Command Parser 3 Bytes 24 Bits Address Jump to execute the Command
 KEY_BUFFER_RPOS  = $000050 ;
 KEY_BUFFER_WPOS  = $000052 ;
-CMD_VARIABLE_TMP = $000054
+CMD_VARIABLE_TMP = $000054 ;
+CMD_ARG_DEV      = $000056 ;
+CMD_ARG_SA       = $000057 ;
+CMD_ARG_EA       = $00005A ;
+CMD_VALID        = $00005D ;
+
+
 ; Bitmap Clear Routine
 BM_CLEAR_SCRN_X  = $000040
 BM_CLEAR_SCRN_Y  = $000042
@@ -61,10 +67,19 @@ BMP_FILE_SIZE    = $000050 ; 4 Bytes
 BMP_POSITION_X   = $000054 ; 2 Bytes Where, the BMP will be position on the X Axis
 BMP_POSITION_Y   = $000056 ; 2 Bytes Where, the BMP will be position on the Y Axis
 BMP_PALET_CHOICE = $000058 ;
-; Not Defined Yet
-KERNEL_TEMP      = $0000D0 ;32 Bytes Temp space for kernel
-USER_TEMP        = $0000F0 ;32 Bytes Temp space for user programs
+;Empty Region
+;XXX             = $000060
+;..
+;..
+;..
+;YYY             = $0000EE
 
+MOUSE_PTR        = $0000E0
+USER_TEMP        = $0000F0 ;32 Bytes Temp space for user programs
+;;///////////////////////////////////////////////////////////////
+;;; NO CODE or Variable ought to be Instatied in this REGION
+;; BEGIN
+;;///////////////////////////////////////////////////////////////
 GAVIN_BLOCK      = $000100 ;256 Bytes Gavin reserved, overlaps debugging registers at $1F0
 
 MULTIPLIER_0     = $000100 ;0 Byte  Unsigned multiplier
@@ -93,42 +108,15 @@ ADDER_SIGNED_32  = $000120 ; The 32 Bit Adders takes 12Byte that are NOT RAM Loc
 ; Reserved
 INT_CONTROLLER   = $000140 ; $000140...$00015F Interrupt Controller
 
-; Interrupt Bit Definition
-; Register Block 0
-FNX0_INT00_ALLONE = $01  ; Not Used - Always 1
-FNX0_INT01_SOF    = $02  ;Start of Frame @ 60FPS
-FNX0_INT02_SOL    = $04  ;Start of Line (Programmable)
-FNX0_INT03_TMR0   = $08  ;Timer 0 Interrupt
-FNX0_INT04_TMR1   = $10  ;Timer 1 Interrupt
-FNX0_INT05_TMR2   = $20  ;Timer 2 Interrupt
-FNX0_INT06_RTC    = $40  ;Real-Time Clock Interrupt
-FNX0_INT07_FDC    = $80  ;Floppy Disk Controller
-; Register Block 1
-FNX1_INT00_KBD    = $01  ;Keyboard Interrupt
-FNX1_INT01_SC0    = $02  ;Sprite 2 Sprite Collision
-FNX1_INT02_SC1    = $04  ;Sprite 2 Tiles Collision
-FNX1_INT03_COM2   = $08  ;Serial Port 2
-FNX1_INT04_COM1   = $10  ;Serial Port 1
-FNX1_INT05_MPU401 = $20  ;Midi Controller Interrupt
-FNX1_INT06_LPT    = $40  ;Parallel Port
-FNX1_INT07_SDCARD = $80  ;SD Card Controller Interrupt
-; Register Block 2
-FNX2_INT00_OPL2R  = $01  ;OPl2 Right Channel
-FNX2_INT01_OPL2L  = $02  ;OPL2 Left Channel
-FNX2_INT02_BTX_INT= $04  ;Beatrix Interrupt (TBD)
-FNX2_INT03_SDMA   = $08  ;System DMA
-FNX2_INT04_VDMA   = $10  ;Video DMA
-FNX2_INT05_DACHP  = $20  ;DAC Hot Plug
-FNX2_INT06_EXT    = $40  ;External Expansion
-FNX2_INT07_ALLONE = $80  ; Not Used - Always 1
-
 TIMER_CONTROLLER = $000160 ; $000160...$00017F Timer0/Timer1/Timer2 Block
 TIMER_CTRL_REGLL = $000160 ;
 TIMER_CTRL_REGLH = $000161 ;
 TIMER_CTRL_REGHL = $000162 ;
 TIMER_CTRL_REGHH = $000163 ;
-VECTOR_STATE     = $0001FF ;1 Byte  Interrupt Vector State. See VECTOR_STATE_ENUM
-
+;;///////////////////////////////////////////////////////////////
+;;; NO CODE or Variable ought to be Instatied in this REGION
+;; END
+;;///////////////////////////////////////////////////////////////
 CPU_REGISTERS    = $000240 ; Byte
 CPUPC            = $000240 ;2 Bytes Program Counter (PC)
 CPUPBR           = $000242 ;2 Bytes Program Bank Register (K)
@@ -179,10 +167,18 @@ SDOS_FILE_NAME   = $000380 ; // Max of 128 Chars
 SDOS_BLK_BEGIN   = $000400 ; 512 Bytes to Store SD Card Incoming or Outcoming Block
 SDOS_BLK_END     = $0006FF ;
 
-STEF_BLOB_BEGIN  = $000E00 ; Temp Buffer for Testing
-STEF_BLOB_END    = $000EFF ;
-
+; COMMAND PARSER Variables
 ; Command Parser Stuff between $000F00 -> $000F84 (see CMD_Parser.asm)
+KEY_BUFFER       = $000F00 ;64 Bytes keyboard buffer
+KEY_BUFFER_SIZE  = $0080 ;128 Bytes (constant) keyboard buffer length
+KEY_BUFFER_END   = $000F7F ;1 Byte  Last byte of keyboard buffer
+KEY_BUFFER_CMD   = $000F83 ;1 Byte  Indicates the Command Process Status
+COMMAND_SIZE_STR = $000F84 ; 1 Byte
+COMMAND_COMP_TMP = $000F86 ; 2 Bytes
+KEYBOARD_SC_FLG  = $000F87 ;1 Bytes that indicate the Status of Left Shift, Left CTRL, Left ALT, Right Shift
+KEYBOARD_SC_TMP  = $000F88 ;1 Byte, Interrupt Save Scan Code while Processing
+
+
 
 TEST_BEGIN       = $001000 ;28672 Bytes Test/diagnostic code for prototype.
 TEST_END         = $007FFF ;0 Byte

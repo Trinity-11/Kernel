@@ -1,6 +1,6 @@
 
 ; 64tass Turbo Assembler Macro V1.53.1515 listing file
-; 64tass --m65816 --long-address --flat -b -o kernel.bin --list kernel.lst kernel.asm
+; 64tass --m65816 --long-address --flat --intel-hex -o kernel.hex --list kernel_hex.lst kernel.asm
 ; Mon May 06 22:04:15 2019
 
 ;Offset	;Hex		;Monitor	;Source
