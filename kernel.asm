@@ -15,6 +15,7 @@
 .include "io_def.asm"         ; Joystick, DipSwitch, CODEC, SDCard Controller Registers
 .include "CMD_Parser.asm"
 .include "monitor.asm"        ; Tom's early code for the Monitor (Possibly useful for PJW)
+.include "Interrupt_Handler.asm" ; Interrupt Handler Routines
 .include "SDOS.asm"           ; Code Library for SD Card Controller (Working, needs a lot improvement and completion)
 .include "OPL2_Library.asm"   ; Library code to drive the OPL2 (right now, only in mono (both side from the same data))
 ; C256 Foenix Kernel
@@ -77,9 +78,9 @@ CLEAR_MEM_LOOP
                 ; are visible. A virtual line is 128 bytes, but 80 columns will be
                 ; visible on screen.
                 setaxl
-                LDX #72
+                LDX #80
                 STX COLS_VISIBLE
-                LDY #56
+                LDY #60
                 STY LINES_VISIBLE
                 LDX #128
                 STX COLS_PER_LINE
@@ -1802,197 +1803,6 @@ BMP_PARSER_COMPUTE_Y_DST
                 ADC #$0000
                 STA BMP_PRSE_DST_PTR+2
                 RTS
-
-
-;////////////////////////////////////////////////////////////////////////////
-;////////////////////////////////////////////////////////////////////////////
-;////////////////////////////////////////////////////////////////////////////
-; Interrupt Handler
-;////////////////////////////////////////////////////////////////////////////
-;////////////////////////////////////////////////////////////////////////////
-;////////////////////////////////////////////////////////////////////////////
-IRQ_HANDLER
-;                LDX #<>irq_Msg
-;                JSL IPRINT       ; print the Init
-                setas 					; Set 8bits
-                ; Go Service the Start of Frame Interrupt Interrupt
-                LDA @lINT_PENDING_REG0
-                AND #FNX0_INT00_SOF
-                CMP #FNX0_INT00_SOF
-                BNE SERVICE_NEXT_IRQ0
-                JSR SOF_INTERRUPT
-                BRA EXIT_IRQ_HANDLE
-
-SERVICE_NEXT_IRQ0
-                LDA @lINT_PENDING_REG0
-                AND #FNX0_INT07_MOUSE
-                CMP #FNX0_INT07_MOUSE
-                BNE SERVICE_NEXT_IRQ7
-                JSR MOUSE_INTERRUPT
-                BRA EXIT_IRQ_HANDLE
-
-SERVICE_NEXT_IRQ7
-                LDA @lINT_PENDING_REG1
-                AND #FNX1_INT00_KBD
-                CMP #FNX1_INT00_KBD
-                BEQ SERVICE_NEXT_IRQ8
-
-EXIT_IRQ_HANDLE
-                ; Exit Interrupt Handler
-                setaxl
-                RTL
-
-SERVICE_NEXT_IRQ8
-                ldx #$0000
-                setxs
-                setas
-                ; Clear the Pending Flag
-                LDA @lINT_PENDING_REG1
-                AND #FNX1_INT00_KBD
-                STA @lINT_PENDING_REG1
-
-IRQ_HANDLER_FETCH
-                LDA KBD_INPT_BUF        ; Get Scan Code from KeyBoard
-                STA KEYBOARD_SC_TMP     ; Save Code Immediately
-                ; Check for Shift Press or Unpressed
-                CMP #$2A                ; Left Shift Pressed
-                BNE NOT_KB_SET_SHIFT
-                BRL KB_SET_SHIFT
-NOT_KB_SET_SHIFT
-                CMP #$AA                ; Left Shift Unpressed
-                BNE NOT_KB_CLR_SHIFT
-                BRL KB_CLR_SHIFT
-NOT_KB_CLR_SHIFT
-                ; Check for CTRL Press or Unpressed
-                CMP #$1D                ; Left CTRL pressed
-                BNE NOT_KB_SET_CTRL
-                BRL KB_SET_CTRL
-NOT_KB_SET_CTRL
-                CMP #$9D                ; Left CTRL Unpressed
-                BNE NOT_KB_CLR_CTRL
-                BRL KB_CLR_CTRL
-
-NOT_KB_CLR_CTRL
-                CMP #$38                ; Left ALT Pressed
-                BNE NOT_KB_SET_ALT
-                BRL KB_SET_ALT
-NOT_KB_SET_ALT
-                CMP #$B8                ; Left ALT Unpressed
-                BNE KB_UNPRESSED
-                BRL KB_CLR_ALT
-
-
-KB_UNPRESSED    AND #$80                ; See if the Scan Code is press or Depressed
-                CMP #$80                ; Depress Status - We will not do anything at this point
-                BNE KB_NORM_SC
-                BRL KB_CHECK_B_DONE
-
-KB_NORM_SC      LDA KEYBOARD_SC_TMP       ;
-                TAX
-                LDA KEYBOARD_SC_FLG     ; Check to See if the SHIFT Key is being Pushed
-                AND #$10
-                CMP #$10
-                BEQ SHIFT_KEY_ON
-
-                LDA KEYBOARD_SC_FLG     ; Check to See if the CTRL Key is being Pushed
-                AND #$20
-                CMP #$20
-                BEQ CTRL_KEY_ON
-
-                LDA KEYBOARD_SC_FLG     ; Check to See if the ALT Key is being Pushed
-                AND #$40
-                CMP #$40
-                BEQ ALT_KEY_ON
-                ; Pick and Choose the Right Bank of Character depending if the Shift/Ctrl/Alt or none are chosen
-                LDA @lScanCode_Press_Set1, x
-                BRL KB_WR_2_SCREEN
-SHIFT_KEY_ON    LDA @lScanCode_Shift_Set1, x
-                BRL KB_WR_2_SCREEN
-CTRL_KEY_ON     LDA @lScanCode_Ctrl_Set1, x
-                BRL KB_WR_2_SCREEN
-ALT_KEY_ON      LDA @lScanCode_Alt_Set1, x
-
-                ; Write Character to Screen (Later in the buffer)
-KB_WR_2_SCREEN
-                PHA
-                setxl
-                JSL SAVECHAR2CMDLINE
-                setas
-                PLA
-                JSL PUTC
-                JMP KB_CHECK_B_DONE
-
-KB_SET_SHIFT    LDA KEYBOARD_SC_FLG
-                ORA #$10
-                STA KEYBOARD_SC_FLG
-                JMP KB_CHECK_B_DONE
-
-KB_CLR_SHIFT    LDA KEYBOARD_SC_FLG
-                AND #$EF
-                STA KEYBOARD_SC_FLG
-                JMP KB_CHECK_B_DONE
-
-KB_SET_CTRL    LDA KEYBOARD_SC_FLG
-                ORA #$20
-                STA KEYBOARD_SC_FLG
-                JMP KB_CHECK_B_DONE
-
-KB_CLR_CTRL    LDA KEYBOARD_SC_FLG
-                AND #$DF
-                STA KEYBOARD_SC_FLG
-                JMP KB_CHECK_B_DONE
-
-KB_SET_ALT      LDA KEYBOARD_SC_FLG
-                ORA #$40
-                STA KEYBOARD_SC_FLG
-                JMP KB_CHECK_B_DONE
-
-KB_CLR_ALT     LDA KEYBOARD_SC_FLG
-                AND #$BF
-                STA KEYBOARD_SC_FLG
-
-KB_CHECK_B_DONE .as
-                LDA STATUS_PORT
-                AND #OUT_BUF_FULL ; Test bit $01 (if 1, Full)
-                CMP #OUT_BUF_FULL ; if Still Byte in the Buffer, fetch it out
-                BNE KB_DONE
-                JMP IRQ_HANDLER_FETCH
-
-KB_DONE
-                setaxl
-                RTL
-
-SOF_INTERRUPT
-                .as
-                LDA @lINT_PENDING_REG0
-                AND #FNX0_INT00_SOF
-                STA @lINT_PENDING_REG0
-                RTS
-;
-MOUSE_INTERRUPT .as
-                setas
-                LDA KBD_INPT_BUF
-                setxs
-                LDX MOUSE_PTR
-                STA @lMOUSE_PTR_BYTE0, X
-                INX
-                CPX #$03
-                BNE EXIT_FOR_NEXT_VALUE
-                ; Create Absolute Count from Relative Input
-
-                LDX #$00
-EXIT_FOR_NEXT_VALUE
-                STX MOUSE_PTR
-                LDA @lINT_PENDING_REG0
-                AND #FNX0_INT07_MOUSE
-                STA @lINT_PENDING_REG0
-                setxl
-                RTS
-
-NMI_HANDLER
-                LDX #<>nmi_Msg
-                JSL IPRINT       ; print the Init
-                RTL
 ;
 ;Not-implemented routines
 ;
@@ -2044,7 +1854,7 @@ old_pc_style_stat
                 .text $BA, " Floppy Driver A:   : Yes         ",$B3," Hard Disk C: Type    : None      ",$BA, $0D
                 .text $BA, " SDCard Card Reader : Yes         ",$B3," Serial Port(s)       : $AF:13F8, ",$BA, $0D
                 .text $BA, " Display Type       : VGA         ",$B3,"                        $AF:12F8  ",$BA, $0D
-                .text $BA, " Foenix Kernel Date : 050419      ",$B3," Parallel Ports(s)    : $AF:1378  ",$BA, $0D
+                .text $BA, " Foenix Kernel Date : 051719      ",$B3," Parallel Ports(s)    : $AF:1378  ",$BA, $0D
                 .text $BA, " Keyboard Type      : PS2         ",$B3," Sound Chip Installed : OPL2(2)   ",$BA, $0D
                 .text $D3, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C1
                 .text      $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $BD, $00
@@ -2234,6 +2044,6 @@ MOUSE_POINTER_PTR     .text $00,$01,$01,$00,$00,$00,$00,$00,$01,$01,$01,$00,$00,
 
 * = $1FF000
 FONT_4_BANK0
-.binary "FONT/Bm437 PhoenixEGA 8x8.bin", 0, 2048
+.binary "FONT/Bm437_PhoenixEGA_8x8.bin", 0, 2048
 FONT_4_BANK1
 .binary "FONT/CBM-ASCII_8x8.bin", 0, 2048

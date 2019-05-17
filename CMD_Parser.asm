@@ -442,14 +442,15 @@ FIND_CMD_ARGTYPE_FN
                 BNE ERROR_PARAMETERMISSING
                 LDY #$0000
                 INX
+KEEP_READING_FN                
                 LDA @lKEY_BUFFER, X     ; Fetch the first char
                 CMP #'"'
                 BEQ DONE_FILE_SAVE
                 STA SDOS_FILE_NAME,Y
                 INX
                 INY
-                CPY #$10
-                BNE
+                CPY #$0010
+                BNE KEEP_READING_FN
 DONE_FILE_SAVE
 
                 RTS
