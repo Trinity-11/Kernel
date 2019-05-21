@@ -11,6 +11,7 @@ IRQ_HANDLER
                 setas 					; Set 8bits
                 ; Go Service the Start of Frame Interrupt Interrupt
 
+
                 ; IRQ0
                 ; Start of Frame Interrupt
                 LDA @lINT_PENDING_REG0
@@ -51,13 +52,14 @@ SERVICE_NEXT_IRQ8 ; Keyboard Interrupt
                 LDA @lINT_PENDING_REG1
                 AND #FNX1_INT00_KBD
                 CMP #FNX1_INT00_KBD
-                BNE SERVICE_NEXT_IRQ8
+                BNE SERVICE_NEXT_IRQ11
                 ; Keyboard Interrupt
                 JSR KEYBOARD_INTERRUPT
                 BRA EXIT_IRQ_HANDLE
                 ;IRQ9 - Not Implemented Yet
                 ;IRQ10 - Not Implemented Yet
                 ;IRQ11
+
 SERVICE_NEXT_IRQ11
                 LDA @lINT_PENDING_REG1
                 AND #FNX1_INT03_COM2
@@ -67,6 +69,7 @@ SERVICE_NEXT_IRQ11
                 JSR COM2_INTERRUPT
                 BRA EXIT_IRQ_HANDLE
                 ;IRQ12
+
 SERVICE_NEXT_IRQ12
                 LDA @lINT_PENDING_REG1
                 AND #FNX1_INT04_COM1
@@ -75,7 +78,7 @@ SERVICE_NEXT_IRQ12
                 ; Serial Port Com1 Interrupt
                 JSR COM1_INTERRUPT
                 BRA EXIT_IRQ_HANDLE
-                ;IRQ13
+;                 ;IRQ13
 SERVICE_NEXT_IRQ13
                 LDA @lINT_PENDING_REG1
                 AND #FNX1_INT05_MPU401
@@ -294,7 +297,12 @@ COM1_INTERRUPT  .as
                 LDA @lINT_PENDING_REG1
                 AND #FNX1_INT04_COM1
                 STA @lINT_PENDING_REG1
-;; PUT YOUR CODE HERE
+
+                LDA #1
+                STA UART_SELECT
+                JSL UART_GETC           ; Get the character
+                JSL IPUTC                ; And echo it to the screen
+
                 RTS
 ;
 ; ///////////////////////////////////////////////////////////////////

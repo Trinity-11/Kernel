@@ -18,6 +18,8 @@
 .include "Interrupt_Handler.asm" ; Interrupt Handler Routines
 .include "SDOS.asm"           ; Code Library for SD Card Controller (Working, needs a lot improvement and completion)
 .include "OPL2_Library.asm"   ; Library code to drive the OPL2 (right now, only in mono (both side from the same data))
+.include "uart.s"             ; Library of UART routines
+
 ; C256 Foenix Kernel
 ; The Kernel is located in flash @ F8:0000 but not accessible by CPU
 ; Kernel Transfered by GAVIN @ Cold Reset to $18:0000 - $1F:FFFF
@@ -87,7 +89,6 @@ CLEAR_MEM_LOOP
                 LDY #64
                 STY LINES_MAX
 
-
                 ; Init CODEC
                 JSL INITCODEC
                 ; Init Suprt IO (Keyboard/Floppy/Etc...)
@@ -125,11 +126,19 @@ greet           setdbr `greet_msg       ;Set data bank to ROM
                 ; Init the Keyboard
                 JSL INITKEYBOARD ;
                 ; Print the legendary "Ready." on screen with Cursor below
+
                 setaxl
 
                 JSL OPL2_TONE_TEST
                 LDX #<>ready_msg
                 JSL IPRINT       ; print the first line
+
+                JSL UART_ENIRQ
+
+                setas         
+
+                ; Uncomment the next line to poll the UART's Interrupt Identification Register
+                JSL UART_POLLIR 
 
                 CLI ; Make sure no Interrupt will come and fuck up Init before this point.
 
@@ -1803,6 +1812,7 @@ BMP_PARSER_COMPUTE_Y_DST
                 ADC #$0000
                 STA BMP_PRSE_DST_PTR+2
                 RTS
+
 ;
 ;Not-implemented routines
 ;

@@ -167,6 +167,9 @@ SDOS_FILE_NAME   = $000380 ; // Max of 128 Chars
 SDOS_BLK_BEGIN   = $000400 ; 512 Bytes to Store SD Card Incoming or Outcoming Block
 SDOS_BLK_END     = $0006FF ;
 
+; UART Variables $00:0700 - $00:07xx
+CURRUART         = $000700  ; 1 byte: the number of the current selected COM port (1 or 2)
+
 ; COMMAND PARSER Variables
 ; Command Parser Stuff between $000F00 -> $000F84 (see CMD_Parser.asm)
 KEY_BUFFER       = $000F00 ;64 Bytes keyboard buffer
