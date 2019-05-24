@@ -18,6 +18,8 @@
 .include "Interrupt_Handler.asm" ; Interrupt Handler Routines
 .include "SDOS.asm"           ; Code Library for SD Card Controller (Working, needs a lot improvement and completion)
 .include "OPL2_Library.asm"   ; Library code to drive the OPL2 (right now, only in mono (both side from the same data))
+;.include "OPL2_Rad_Player.asm"
+
 ; C256 Foenix Kernel
 ; The Kernel is located in flash @ F8:0000 but not accessible by CPU
 ; Kernel Transfered by GAVIN @ Cold Reset to $18:0000 - $1F:FFFF
@@ -127,7 +129,8 @@ greet           setdbr `greet_msg       ;Set data bank to ROM
                 ; Print the legendary "Ready." on screen with Cursor below
                 setaxl
 
-                JSL OPL2_TONE_TEST
+                ;JSL OPL2_TONE_TEST
+                ;JSL OPL2_INIT_PLAYER
                 LDX #<>ready_msg
                 JSL IPRINT       ; print the first line
 
@@ -1854,7 +1857,7 @@ old_pc_style_stat
                 .text $BA, " Floppy Driver A:   : Yes         ",$B3," Hard Disk C: Type    : None      ",$BA, $0D
                 .text $BA, " SDCard Card Reader : Yes         ",$B3," Serial Port(s)       : $AF:13F8, ",$BA, $0D
                 .text $BA, " Display Type       : VGA         ",$B3,"                        $AF:12F8  ",$BA, $0D
-                .text $BA, " Foenix Kernel Date : 051719      ",$B3," Parallel Ports(s)    : $AF:1378  ",$BA, $0D
+                .text $BA, " Foenix Kernel Date : 052319      ",$B3," Parallel Ports(s)    : $AF:1378  ",$BA, $0D
                 .text $BA, " Keyboard Type      : PS2         ",$B3," Sound Chip Installed : OPL2(2)   ",$BA, $0D
                 .text $D3, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C1
                 .text      $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $BD, $00
@@ -1900,7 +1903,6 @@ bg_color_lut	  .text $00, $00, $00, $FF
                 .text $40, $40, $40, $FF
                 .text $FF, $FF, $FF, $FF
 
-version_msg     .text $0D, "Debug Code Version 0.0.0 - March 26th, 2019", $00
 pass_tst0xAAmsg .text "Cmd 0xAA Test passed...", $0D, $00
 pass_tst0xABmsg .text "Cmd 0xAB Test passed...", $0D, $00
 pass_cmd0x60msg .text "Cmd 0x60 Executed.", $0D, $00
@@ -1908,8 +1910,6 @@ pass_cmd0xFFmsg .text "Cmd 0xFF (Reset) Done.", $0D, $00
 pass_cmd0xEEmsg .text "Cmd 0xEE Echo Test passed...", $0D, $00
 Success_kb_init .text "Keyboard Present", $0D, $00
 Failed_kb_init  .text "No Keyboard Attached or Failed Init...", $0D, $00
-irq_Msg         .text "[IRQ Interrupt]", $0D, $00
-nmi_Msg         .text "[NMI Interrupt]", $0D, $00
 bmp_parser_err0 .text "NO SIGNATURE FOUND.", $00
 bmp_parser_msg0 .text "BMP LOADED.", $00
 bmp_parser_msg1 .text "EXECUTING BMP PARSER", $00

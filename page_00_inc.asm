@@ -4,6 +4,9 @@
 ;* Addresses are the byte AFTER the block. Use this to confirm block locations and check for overlaps
 BANK0_BEGIN      = $000000 ;Start of bank 0 and Direct page
 unused_0000      = $000000 ;12 Bytes unused
+OPL2_ADDY_PTR_LO = $000008  ; THis Points towards the Instruments Database
+OPL2_ADDY_PTR_MD = $000009
+OPL2_ADDY_PTR_HI = $00000A
 SCREENBEGIN      = $00000C ;3 Bytes Start of screen in video RAM. This is the upper-left corrner of the current video page being written to. This may not be what's being displayed by VICKY. Update this if you change VICKY's display page.
 COLS_VISIBLE     = $00000F ;2 Bytes Columns visible per screen line. A virtual line can be longer than displayed, up to COLS_PER_LINE long. Default = 80
 COLS_PER_LINE    = $000011 ;2 Bytes Columns in memory per screen line. A virtual line can be this long. Default=128
@@ -26,11 +29,12 @@ OPL2_IND_ADDY_LL = $00002C ; 2 Bytes Reserved (Only need 3)
 OPL2_IND_ADDY_HL = $00002E ; 2 Bytes Reserved (Only need 3)
 OPL2_NOTE        = $000030 ; 1 Byte
 OPL2_OCTAVE      = $000031 ; 1 Byte
-OPL2_PARAMETER0  = $000032 ; 1 Byte
+OPL2_PARAMETER0  = $000032 ; 1 Byte - Key On/Feedback
 OPL2_PARAMETER1  = $000033 ; 1 Byte
 OPL2_PARAMETER2  = $000034 ; 1 Byte
 OPL2_PARAMETER3  = $000035 ; 1 Byte
 OPL2_LOOP        = $000036 ;
+OPL2_BLOCK       = $000036
 ; SD Card (CH376S) Variables
 SDCARD_FILE_PTR  = $000038 ; 3 Bytes Pointer to Filename to open
 SDCARD_BYTE_NUM  = $00003C ; 2Bytes
@@ -54,6 +58,18 @@ CMD_VALID        = $00005D ;
 ; Bitmap Clear Routine
 BM_CLEAR_SCRN_X  = $000040
 BM_CLEAR_SCRN_Y  = $000042
+; RAD File Player
+RAD_STARTLINE    = $000040 ; 1 Byte
+RAD_PATTERN_IDX  = $000041 ; 1 Byte
+RAD_LINE         = $000042 ; 1 Byte
+RAD_LINENUMBER   = $000043 ; 1 Byte
+RAD_CHANNEL_NUM  = $000044 ; 1 Byte
+RAD_ISLASTCHAN   = $000045 ; 1 Byte
+RAD_Y_POINTER    = $000046 ; 2 Bytes
+RAD_TICK         = $000048
+RAD_CHANNEL_DATA = $00004A ; 2 Bytes
+RAD_CHANNE_EFFCT = $00004C
+RAD_TEMP         = $00004D
 
 ; BMP File Parser Variables (Can be shared if BMP Parser not used)
 ; Used for Command Parser Mainly
@@ -75,6 +91,11 @@ BMP_PALET_CHOICE = $000058 ;
 ;YYY             = $0000EE
 
 MOUSE_PTR        = $0000E0
+MOUSE_POS_X_LO   = $0000E1
+MOUSE_POS_X_HI   = $0000E2
+MOUSE_POS_Y_LO   = $0000E3
+MOUSE_POS_Y_HI   = $0000E4
+
 USER_TEMP        = $0000F0 ;32 Bytes Temp space for user programs
 ;;///////////////////////////////////////////////////////////////
 ;;; NO CODE or Variable ought to be Instatied in this REGION
