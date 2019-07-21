@@ -57,6 +57,7 @@ MDOS            JML IMDOS
 ;
 IMONITOR        CLC           ; clear the carry flag
                 XCE           ; move carry to emulation flag.
+                setal
                 LDA #STACK_END ; Reset the stack
                 TAS
                 JML IMREADY

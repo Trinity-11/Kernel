@@ -1,6 +1,6 @@
 
 ; 64tass Turbo Assembler Macro V1.53.1515 listing file
-; 64tass --m65816 --long-address --flat -b -o kernel.bin --list kernel.lst kernel.asm
+; 64tass --m65816 --long-address --flat --intel-hex -o kernel.hex --list kernel_hex.lst kernel.asm
 ; Mon May 06 22:04:15 2019
 
 ;Offset	;Hex		;Monitor	;Source
@@ -129,12 +129,6 @@
 =$000271				MARG6            = $000271 ;4 Bytes First command argument. May be data or address, depending on command. Data is 32-bit number. Address is 24-bit address and 8-bit length.
 =$000275				MARG7            = $000275 ;4 Bytes First command argument. May be data or address, depending on command. Data is 32-bit number. Address is 24-bit address and 8-bit length.
 =$000279				MARG8            = $000279 ;4 Bytes First command argument. May be data or address, depending on command. Data is 32-bit number. Address is 24-bit address and 8-bit length.
-=$00027d				MCURSOR          = $00027D ;3 Bytes Pointer to the current memory location for disassembly, memory dump, etc.
-=$000280				MLINEBUF         = $000280 ;17 Byte buffer for dumping memory (TODO: could be moved to a general string scratch area)
-=$000291				MARG_LEN         = $000291 ;1 Byte count of the number of arguments passed
-=$000292				MCOUNT           = $000292 ;2 Byte counter
-=$000294				MTEMP            = $000294 ;4 Bytes of temporary space
-=$000299				MCPUSTAT         = $000299 ;1 Byte to represent what the disassembler thinks the processor MX bits are
 =$000300				LOADFILE_VARS    = $000300 ; Byte
 =$000300				LOADFILE_NAME    = $000300 ;3 Bytes (addr) Name of file to load. Address in Data Page
 =$000303				LOADFILE_LEN     = $000303 ;1 Byte  Length of filename. 0=Null Terminated
