@@ -17,6 +17,7 @@ CURATTR          = $000020 ;2 Bytes Attribute of next character to be printed to
 STACKBOT         = $000022 ;2 Bytes Lowest location the stack should be allowed to write to. If SP falls below this value, the runtime should generate STACK OVERFLOW error and abort.
 STACKTOP         = $000024 ;2 Bytes Highest location the stack can occupy. If SP goes above this value, the runtime should generate STACK OVERFLOW error and abort.
 ; OPL2 Library Variable (Can be shared if Library is not used)
+; THis will need to move eventually
 OPL2_OPERATOR    = $000026 ;
 OPL2_CHANNEL     = $000027 ;
 OPL2_REG_REGION  = $000028 ; Offset to the Group of Registers
@@ -34,11 +35,24 @@ OPL2_LOOP        = $000036 ;
 SDCARD_FILE_PTR  = $000038 ; 3 Bytes Pointer to Filename to open
 SDCARD_BYTE_NUM  = $00003C ; 2Bytes
 SDCARD_PRSNT_MNT = $00003F ; 1 Byte, Indicate that the SDCard is Present and that it is Mounted
-; BMP File Parser Variables (Can be shared if BMP Parser not used)
-BMP_X_SIZE       = $000040 ; 2 Bytes
+; Command Line Parser Variables
+CMD_PARSER_TMPX  = $000040 ; <<< Command Parser 2Bytes
+CMD_PARSER_TMPY  = $000042 ; <<< Command Parser 2Bytes
+CMD_LIST_PTR     = $000044 ; <<< Command Parser 3 Bytes
+CMD_PARSER_PTR   = $000048 ; <<< Command Parser 3 Bytes
+CMD_ATTRIBUTE    = $00004B ; <<< Command Parser 2 Bytes (16bits Attribute Field)
+CMD_EXEC_ADDY    = $00004D ; <<< Command Parser 3 Bytes 24 Bits Address Jump to execute the Command
+KEY_BUFFER_RPOS  = $000050 ;
+KEY_BUFFER_WPOS  = $000052 ;
+CMD_VARIABLE_TMP = $000054
+; Bitmap Clear Routine
 BM_CLEAR_SCRN_X  = $000040
-BMP_Y_SIZE       = $000042 ; 2 Bytes
 BM_CLEAR_SCRN_Y  = $000042
+
+; BMP File Parser Variables (Can be shared if BMP Parser not used)
+; Used for Command Parser Mainly
+BMP_X_SIZE       = $000040 ; 2 Bytes
+BMP_Y_SIZE       = $000042 ; 2 Bytes
 BMP_PRSE_SRC_PTR = $000044 ; 3 Bytes
 BMP_PRSE_DST_PTR = $000048 ; 3 Bytes
 BMP_COLOR_PALET  = $00004C ; 2 Bytes
@@ -165,16 +179,14 @@ SDOS_FILE_NAME   = $000380 ; // Max of 128 Chars
 SDOS_BLK_BEGIN   = $000400 ; 512 Bytes to Store SD Card Incoming or Outcoming Block
 SDOS_BLK_END     = $0006FF ;
 
+; $00:0700 - $00:070F - Reserved for Serial I/O
+CURRUART         = $000700 ; 24-bit pointer to the current UART
+
 STEF_BLOB_BEGIN  = $000E00 ; Temp Buffer for Testing
 STEF_BLOB_END    = $000EFF ;
 
-KEY_BUFFER       = $000F00 ;64 Bytes keyboard buffer
-KEY_BUFFER_SIZE  = $40 ;64 Bytes (constant) keyboard buffer length
-KEY_BUFFER_END   = $000F3F ;1 Byte  Last byte of keyboard buffer
-KEY_BUFFER_RPOS  = $000F40 ;2 Bytes keyboard buffer read position
-KEY_BUFFER_WPOS  = $000F42 ;2 Bytes keyboard buffer write position
-KEYBOARD_SC_FLG  = $000F43 ;1 Bytes that indicate the Status of Left Shift, Left CTRL, Left ALT, Right Shift
-KEYBOARD_SC_TMP  = $000F44 ;1 Byte, Interrupt Save Scan Code while Processing
+; Command Parser Stuff between $000F00 -> $000F84 (see CMD_Parser.asm)
+
 TEST_BEGIN       = $001000 ;28672 Bytes Test/diagnostic code for prototype.
 TEST_END         = $007FFF ;0 Byte
 

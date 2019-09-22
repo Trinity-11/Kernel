@@ -13,10 +13,16 @@
 .include "SID_def.asm"        ; SID, but not the latest - Deprecated for now.
 .include "RTC_def.asm"        ; Real-Time Clock Register Definition (BQ4802)
 .include "io_def.asm"         ; Joystick, DipSwitch, CODEC, SDCard Controller Registers
+.include "CMD_Parser.asm"
 .include "monitor.asm"        ; Tom's early code for the Monitor (Possibly useful for PJW)
 .include "SDOS.asm"           ; Code Library for SD Card Controller (Working, needs a lot improvement and completion)
 .include "OPL2_Library.asm"   ; Library code to drive the OPL2 (right now, only in mono (both side from the same data))
-.include "BM437_ATI_FontSet.asm" ; This is the Official (I modified 2 Chars for the Foenix Logo) PC 8x8 Char Set from the ATI BIOS
+.include "Floppy.asm"
+.include "FAT12.asm"
+.include "FAT32.asm"
+.include "MIDI_MPU_401_def.asm"
+.include "LPT.asm"
+.include "uart.s"
 ; C256 Foenix Kernel
 ; The Kernel is located in flash @ F8:0000 but not accessible by CPU
 ; Kernel Transfered by GAVIN @ Cold Reset to $18:0000 - $1F:FFFF
@@ -67,13 +73,13 @@ CLEAR_MEM_LOOP
                 setas
                 LDA #`SCREEN_PAGE0
                 STA CURSORPOS+2
-
                 LDA #$00
                 STA KEYBOARD_SC_FLG     ; Clear the Keyboard Flag
 
                 ; Set screen dimensions. There more columns in memory than
                 ; are visible. A virtual line is 128 bytes, but 80 columns will be
                 ; visible on screen.
+                setaxl
                 LDX #72
                 STX COLS_VISIBLE
                 LDY #56
@@ -83,7 +89,7 @@ CLEAR_MEM_LOOP
                 LDY #64
                 STY LINES_MAX
 
-                setaxl
+
                 ; Init CODEC
                 JSL INITCODEC
                 ; Init Suprt IO (Keyboard/Floppy/Etc...)
@@ -113,23 +119,638 @@ greet           setdbr `greet_msg       ;Set data bank to ROM
                 LDX #<>greet_msg
                 JSL IPRINT       ; print the first line
                  ; Let's Change the Color Memory For the Logo
-                LDX #<>version_msg
+                ;LDX #<>version_msg
+                LDX #<>old_pc_style_stat
                 JSL IPRINT       ; print the first line
+
                 setdp 0
                 ; Init the Keyboard
                 JSL INITKEYBOARD ;
                 ; Print the legendary "Ready." on screen with Cursor below
                 setaxl
+
+                JSL OPL2_TONE_TEST
+
+                setal
+                LDA #1              ; Select COM1
+                JSL UART_SELECT
+                JSL UART_INIT       ; And initialize it
                 LDX #<>ready_msg
+                JSL UART_PUTS
+                LDA #$A
+                JSL UART_PUTC
+                LDA #$D
+                JSL UART_PUTC
+                ;LDX #<>ready_msg
+                ;JSL UART_PUTS
+                ;---------------------------------------------------------------
+                ; FAT
+                JSL FAT32_init  ; initialise the FAT so get the MBR / boot sector / first Root directory cluster
+                JSL FAT32_test
+
+                ;---------------------------------------------------------------
+                ; Joystic test code START
+
+; Joystic_Loop    LDA JOYSTICK0
+;                 LDA JOYSTICK1
+;                 LDA JOYSTICK2
+;                 LDA JOYSTICK3
+;                 LDX #2000    ; 2s
+;                 JSL ILOOP_MS
+;                 ;;BRA Joystic_Loop
+;                 ;---------------------------------------------------------------
+;                 ; PPT test code START
+;
+;
+;                 ;---------------------------------------------------------------
+;                 ; MIDI test code START
+;
+;                 ;;LDA #$A
+;                 ;;JSL UART_PUTC
+;                 ;;LDA #$D
+;                 ;;JSL UART_PUTC
+;                 ; the command are listed in "MIDI PROCESSING UNIT - MPU-401 - TECHNICAL REFERENCE MANUAL" from Roland
+;                 setas
+;                 ;;LDA #$89        ; MIDI THRU on
+;                 ;;STA MIDI_MPU_COMMAND
+;                 ;;LDX #20000      ; 2s
+;                 ;;JSL ILOOP_MS
+;                 ;;BRA Loop_MIDI
+;                 LDA #$FF        ; reset the module
+;                 STA MIDI_MPU_COMMAND
+;                 LDX #100
+;                 JSL ILOOP_MS
+;                 LDA MIDI_DATA  ; get the 0xFE out of the way after the resaet if on the module was in MIDI mode
+;                 LDA #$3F        ; set the module in UART mode
+;                 STA MIDI_MPU_COMMAND
+;                 LDX #100
+;                 JSL ILOOP_MS
+;                 LDA MIDI_DATA  ; get the 0xFE out of the way
+;                 LDX #100
+;                 JSL ILOOP_MS
+;                 ;;LDX #100
+;                 ;;JSL ILOOP_MS
+;                 ;;LDA #$90        ; Note ON  90 50 7F => 9x | Note | Velocity
+;                 ;;STA MIDI_MPU_COMMAND
+;               ;;  LDX #100
+;                 ;;JSL ILOOP_MS
+;                 ;;LDA #$50
+;                 ;;STA MIDI_MPU_COMMAND
+;                 ;;LDX #100
+;                 ;;JSL ILOOP_MS
+;                 ;;LDA #$7F
+;                 ;;STA MIDI_MPU_COMMAND
+;                 ;;LDX #100
+;                 ;;JSL ILOOP_MS
+; Loop_MIDI       ; this code will acte as a MIDI thru
+;                 LDA MIDI_MPU_STATUS
+;                 CMP 0
+;                 BNE Loop_MIDI     ; no data recieved
+;                 LDA MIDI_DATA    ; read the byte crecieved
+;                 STA MIDI_DATA    ; dent it on the midi output
+;
+;                 JSL UART_PUTHEX_2 ; print the recieved command on  the uart console
+;                 LDA #$A
+;                 JSL UART_PUTC
+;                 LDA #$D
+;                 JSL UART_PUTC
+;                 ;;;;;;;;;;;;;;;;;;;;BRA Loop_MIDI
+                ;---------------------------------------------------------------
+                ; PPT test code START
+ppt_Main_loop
+                ; write the data in the PPT port
+                setas
+                setdbr`$AF1378
+                LDA #$55
+                STA $AF1378
+                setas
+                LDX #2000
+                JSL ILOOP_MS
+
+                ;------------------
+                ; read the status bits
+                setas
+                setdbr`$AF1379
+                LDA $AF1379
+
+                JSL UART_PUTHEX
+                LDA #$A
+                JSL UART_PUTC
+                LDA #$D
+                JSL UART_PUTC
+                setas
+                LDX #2000
+                JSL ILOOP_MS
+
+                ;------------------
+                ; send the strop  signal
+                setas
+                setdbr`$AF137A
+                LDA $AF137A     ; get the register content
+                ORA #$01        ; set the strob bit
+                STA $AF137A
+                LDX #200
+                JSL ILOOP_MS
+                setas
+                setdbr`$AF137A
+                LDA $AF137A     ; get the register content
+                AND #$FE        ; clear the strob bit
+                STA $AF137A
+                LDX #2000
+                JSL ILOOP_MS
+
+
+                ;--------------
+                ;--------------
+                ;--------------
+
+                setas
+                setdbr`$AF1378
+                LDA #$AA
+                STA $AF1378
+                setas
+                LDX #2000
+                JSL ILOOP_MS
+
+                ;------------------
+                ; read the status bits
+                setas
+                setdbr`$AF1379
+                LDA $AF1379
+
+                JSL UART_PUTHEX
+                LDA #$A
+                JSL UART_PUTC
+                LDA #$D
+                JSL UART_PUTC
+                setas
+                LDX #2000
+                JSL ILOOP_MS
+
+                ;------------------
+                ; send the strop  signal
+                setas
+                setdbr`$AF137A
+                LDA $AF137A     ; get the register content
+                ;JSL UART_PUTHEX
+               ;LDA #$A
+                ;JSL UART_PUTC
+                ;LDA #$D
+                ;JSL UART_PUTC
+                setdbr`$AF137A
+                LDA $AF137A     ; get the register content
+                ORA #$01        ; set the strob bit
+                STA $AF137A
+                setdbr`$AF137A
+                LDA $AF137A     ; get the register content
+                ;JSL UART_PUTHEX
+                ;LDA #$A
+                ;JSL UART_PUTC
+                ;LDA #$D
+                ;JSL UART_PUTC
+                ;LDA #$A
+                ;JSL UART_PUTC
+                ;LDA #$D
+                ;JSL UART_PUTC
+                LDX #200
+                JSL ILOOP_MS
+                setas
+                setdbr`$AF137A
+                LDA $AF137A     ; get the register content
+                AND #$FE        ; clear the strob bit
+                STA $AF137A
+                LDX #2000
+                JSL ILOOP_MS
+
+                ;setdbr `minus_line
+                ;LDX #<>minus_line
+                ;JSL UART_PUTS
+
+                ;;;;;BRL ppt_Main_loop
+
+                ;---------------------------------------------------------------
+                ; LPT ECP test code START
+                JSL IECP_SET_LPT_TO_ECP_MODE
+                JSL IECP_DEACTIVE_INTERRUPT
+                JSL IECP_SET_DATA_OUT
+
+
+ECP_Main_loop
+
+                setas
+                LDX #2000
+                JSL ILOOP_MS
+                JSL IECP_SET_HostClk_LINE_LOW
+                setas
+                LDX #2000
+                JSL ILOOP_MS
+                JSL IECP_SET_HostClk_LINE_HIGH
+                ;-------------
+                setas
+                LDX #2000
+                JSL ILOOP_MS
+                JSL IECP_SET_HostAck_LINE_LOW
+                setas
+                LDX #2000
+                JSL ILOOP_MS
+                JSL IECP_SET_HostAck_LINE_HIGH
+                ;-------------
+                setas
+                LDX #2000
+                JSL ILOOP_MS
+                JSL IECP_SET_nReverseRequest_LINE_LOW
+                setas
+                LDX #2000
+                JSL ILOOP_MS
+                JSL IECP_SET_nReverseRequest_LINE_HIGH
+                ;-------------
+                setas
+                LDX #2000
+                JSL ILOOP_MS
+                JSL IECP_SET_ECPMode_LINE_LOW
+                setas
+                LDX #2000
+                JSL ILOOP_MS
+                JSL IECP_SET_ECPMode_LINE_HIGH
+
+
+                setas
+                setdbr`$AF1378
+                LDA #$AA
+                STA $AF1378
+                setas
+                LDX #2000
+                JSL ILOOP_MS
+
+                setas
+                setdbr`$AF1378
+                LDA #$55
+                STA $AF1378
+                setas
+                LDX #2000
+                JSL ILOOP_MS
+                ;BRL ECP_Main_loop
+                LDA #$3 ; ECP mode
+                JSL IECP_SET_ECP_MODE
+                JSL IECP_DEACTIVE_INTERRUPT
+                JSL IECP_SET_DATA_OUT
+ECP_Main_loop_2
+                setas
+                LDX #40000
+                JSL ILOOP_MS
+                setas
+                setdbr`ECP_A_FIFO
+                LDA #$11
+                STA ECP_A_FIFO
+                LDA #$22
+                STA ECP_D_FIFO
+                LDA #$23
+                STA ECP_D_FIFO
+                ;setas
+                ;LDX #2000
+                ;JSL ILOOP_MS
+                ;setdbr`$AF1378
+                ;lLDA #$44
+                ;STA $AF1378
+                ;LDA #$88
+                ;STA $AF1378
+
+                BRL ECP_Main_loop_2
+
+
+                ;---------------------------------------------------------------
+                ; Floppy test code START
+                setdbr `minus_line
+                LDX #<>minus_line
+                JSL UART_PUTS
+                JSL IFDD_PRINT_REG  ; read the FDD register value
+                setaxl
+                JSL IFDD_INIT_AT
+                JSL IFDD_PRINT_REG  ; read the FDD register value
+seek_loop
+                LDA 0
+                PHA
+                setas
+                setdbr`$AFA200
+                LDX #0
+                LDA #0
+  ERAZE_SCREEN_1  STA $AFA000 ,X
+                INX
+                CPX #$2000
+                BNE ERAZE_SCREEN_1
+                setdbr`$AFA200
+                LDX #0
+seek_loop_2_     LDA #0
+ERAZE_SCREEN_2  STA $AFA200 ,X
+                INX
+                CPX #$2000
+                BNE ERAZE_SCREEN_2
+                ;--------
+                ; LDA #0                      ; Floppy driver to work with and side
+                ; LDX #1                      ; MFM:1/FM:0
+                ; JSL IFDD_READ_ID
+                ; JSL IFDD_PRINT_FDD_MS_REG  ; read the FDD register value
+                ; JSL IFDD_SENS_INTERRUPT_STATUS
+                ; JSL IFDD_PRINT_FDD_MS_REG  ; read the FDD register value
+                ;--------
+                LDA #$1                     ; ND ("1":non-DMA mode / "0":DMA mode)
+                PHA
+                LDA #$0                     ; HLT (Head Load Time)
+                PHA
+                LDA #$0                     ; HUT (Head Unload Time)
+                PHA
+                LDA #$0                     ; SRT (Step Rate Time)
+                PHA
+                ;;JSL IFDD_SPECIFY
+                PLA
+                PLA
+                PLA
+                PLA
+                ;JSL IFDD_PRINT_FDD_MS_REG  ; read the FDD register value
+                setas
+                LDA #0                      ; Floppy driver to work with and side
+                LDX #1                      ; MFM:1/FM:0
+                JSL IFDD_READ_ID
+                JSL IFDD_SENS_INTERRUPT_STATUS
+                ;
+                ; ; LDA #0            ; Sellect the floppy disc drive 0
+                ; ; JSL IFDD_RECALIBRATE
+                ; ; ;JSL IFDD_PRINT_FDD_MS_REG  ; read the FDD register value
+                ; ; JSL IFDD_SENS_INTERRUPT_STATUS
+                ; ; ;JSL IFDD_PRINT_FDD_MS_REG  ; read the FDD register value
+                setas
+                LDA #$0                    ; R (Sector Adress)
+                PHA
+                LDA #$0                    ; H (Head Address)
+                PHA
+                LDA #$0                    ; C (Cylender Adress)
+                PHA
+                LDA #$AA                    ; D (Byte filler)
+                PHA
+                LDA #$54                    ; GPL (Gap3)
+                PHA
+                LDA #$9                    ; SC (Sector Per Cylender)
+                PHA
+                LDA #$2                    ; N (Byte per sector)
+                PHA
+                LDA #$0                    ; HDS/DS1-DS0 (Head DRIVE1-Drive0)
+                PHA
+                LDA #$1                    ; MFM
+                PHA
+                LDA #$FF
+                JSL IFDD_FORMAT_TRACK
+                PLA
+                PLA
+                PLA
+                PLA
+                PLA
+                PLA
+                PLA
+                PLA
+                PLA
+                setaxl
+                LDX #5000
+                JSL ILOOP_MS
+
+                setas
+                LDA 0
+                LDX #1                      ; MFM:1/FM:0
+                JSL IFDD_READ_ID
+                LDX #2000
+                JSL ILOOP_MS
+                ;JSL IFDD_PRINT_REG
+                ;LDX #2000
+                ;JSL ILOOP_MS
+                ;;JSL IFDD_SENS_INTERRUPT_STATUS
+                ;LDX #$00
+                ;JSL IFDD_READ_FDD
+                ;JSL IFDD_SENS_INTERRUPT_STATUS
+                ;LDX #2000
+                ;JSL ILOOP_MS
+                ; LDA #1, S            ; read the next sector
+                ; INC A
+                ; STA #1, S
+                ; JSL IFDD_PRINT_REG
+                ;BRA fdd_loop_forever
+
+seek_loop_2
+
+
+                setas
+                LDA #0
+                LDX #10
+                JSL IFDD_SEEKRELATIF_UP ;JSL IFDD_SEEK
+                LDX #20000
+                JSL ILOOP_MS
+                setas
+                LDA #0
+                LDX #20
+                JSL IFDD_SEEKRELATIF_UP ;JSL IFDD_SEEK
+                LDX #20000
+                JSL ILOOP_MS
+                setas
+                LDA #0
+                LDX #20
+                JSL IFDD_SEEKRELATIF_DOWN ;JSL IFDD_SEEK
+                LDX #20000
+                JSL ILOOP_MS
+                setas
+                LDA #0
+                LDX #5
+                JSL IFDD_SEEKRELATIF_UP ;JSL IFDD_SEEK
+                LDX #20000
+                JSL ILOOP_MS
+                setas
+                LDA #0
+                LDX #10
+                JSL IFDD_SEEKRELATIF_DOWN ;JSL IFDD_SEEK
+                LDX #20000
+                JSL ILOOP_MS
+                setas
+                LDA #0
+                LDX #5
+                JSL IFDD_SEEKRELATIF_DOWN ;JSL IFDD_SEEK
+                LDX #20000
+                JSL ILOOP_MS
+                JSL IFDD_SENS_INTERRUPT_STATUS
+                setas
+                LDA 0
+                LDX #1                      ; MFM:1/FM:0
+                ;;;;;JSL IFDD_READ_ID
+                ; setas
+                ; JSL IFDD_SENS_INTERRUPT_STATUS
+                ; LDX #20000
+                ; JSL ILOOP_MS
+                LDA #0            ; Sellect the floppy disc drive 0
+                ;JSL IFDD_RECALIBRATE
+                LDX #20000
+                JSL ILOOP_MS
+                ;JSL IFDD_SENS_INTERRUPT_STATUS
+
+
+
+
+                ; JSL IFDD_SENS_INTERRUPT_STATUS
+                ; JSL IFDD_MOTOR_0_OFF
+                ; LDX #20000
+                ; JSL ILOOP_MS
+                ; JSL IFDD_MOTOR_0_ON
+                ; LDX #20000
+                ; JSL ILOOP_MS
+                ;BRA seek_loop_2
+                BRL seek_loop_2
+
+
+                JSL IFDD_PRINT_REG  ; read the FDD register value
+                setaxl
+                LDX #20000
+                JSL ILOOP_MS
+                JSL IFDD_PRINT_REG  ; read the FDD register value
+                setaxl
+                LDX #500
+                JSL ILOOP_MS
+                JSL IFDD_PRINT_REG  ; read the FDD register value
+                setaxl
+                LDX #20000
+                JSL ILOOP_MS
+                setas
+                LDA #0
+                LDX #15
+                JSL IFDD_SEEK
+                JSL IFDD_PRINT_REG  ; read the FDD register value
+                setaxl
+                LDX #5000
+                JSL ILOOP_MS
+                ;JSL IFDD_PRINT_REG  ; read the FDD register value
+                ;setaxl
+                ;LDX #500
+                ;JSL ILOOP_MS
+                ;JSL IFDD_PRINT_REG  ; read the FDD register value
+                ;--------
+                ;code needed because the BRA seek_loop at the en of the code block was too far
+                ;BRA seek_loop
+                BRA next_instruction
+seek_loop_step1
+                ;BRA seek_loop
+next_instruction
+                ;--------
+                setdbr `minus_line
+                LDX #<>minus_line
+                JSL UART_PUTS
+                LDX #<>minus_line
+                JSL UART_PUTS
+                setaxl
+                LDX #500
+                JSL ILOOP_MS
+                setas
+                LDA #0
+                JSL IFDD_GET_DRIVE_STATUS
+                setas
+                setdbr `FLOPPY_CMD_BUFFER
+                LDA FLOPPY_CMD_BUFFER
+                JSL UART_PUTHEX
+                LDA #$A
+                JSL UART_PUTC
+                LDA #$D
+                JSL UART_PUTC
+
+                setdbr `minus_line
+                LDX #<>minus_line
+                JSL UART_PUTS
+                JSL IFDD_MOTOR_0_OFF
+                BRA seek_loop_step1
+                ;---------------
+
+                ;---------------------------------------------------------------
+                ; FAT 12 test code START
+                setaxl
+                LDA #`file_to_load ; load the byte nb 3 (bank byte)
+                PHA
+                LDA #<>file_to_load ; load the low world part of the buffer address
+                PHA
+                LDA #`FAT12_ADDRESS_BUFFER_512 ; load the byte nb 3 (bank byte)
+                PHA
+                LDA #<>FAT12_ADDRESS_BUFFER_512 ; load the low world part of the buffer address
+                PHA
+                ;JSL ILOAD_FILE
+                JSL IFAT12_READ_BOOT_SECTOR
+
+
+                CMP #$0001
+                BEQ FAT_12_BOOT_SECTOR_PARSING_OK
+                LDX #<>error_FAT
                 JSL IPRINT       ; print the first line
 
+FAT_12_BOOT_SECTOR_PARSING_OK
+                ;LDX #<>text_BOOT_SECTOR_PARSING_OK
+                ;JSL IPRINT       ; print the first line
+                JSL IFAT12_GET_ROOT_DIR_POS
+                setaxl
+                LDA #$00 ; sellect the first entry
+                PHA
+FDD_DISPLAY_NEXT_ROOT_ENTRY
+                JSL IFAT12_GET_ROOT_ENTRY
+                setdbr `Root_entry_value
+                LDX #<>Root_entry_value
+                JSL IPRINT       ; print the first line
+                setaxl
+                PLA
+                CMP #20 ;Max_Root_Entry ; limit jusy how many enty is displayed
+                BEQ FDD_END_DISPLAY_ROOT_ENTRY_LOOP
+                INC A
+                PHA
+
+                BRA FDD_DISPLAY_NEXT_ROOT_ENTRY
+FDD_END_DISPLAY_ROOT_ENTRY_LOOP
+                PLA
+                LDA #0 ; read fthe first root entry
+                JSL IFAT12_GET_ROOT_ENTRY
+                BRA FIRST_ROOT_ENTRY_READ
+READ_NEXT_FILE
+
+FIRST_ROOT_ENTRY_READ
+                LDA Root_entry_value + 26 ; get the first fat entry for the fil from the root directory entry 0
+                ;ADC #1+9+9+14 ; skip the reserved sector ,  the 2 fat and the root sector
+                STA Fat12_next_entry
+
+Read_next_sector; read sector function to call there
+                LDA #`FAT12_ADDRESS_BUFFER_512 ; load the byte nb 3 (bank byte)
+                PHA
+                LDA #<>FAT12_ADDRESS_BUFFER_512 ; load the low world part of the buffer address
+                PHA
+                LDA Fat12_next_entry ; sector to read
+                ADC #1+9+9+14
+                JSL IFDD_READ
+                PLX
+                PLX
+                LDA Fat12_next_entry ; sector to read
+                JSL IFAT_GET_FAT_ENTRY
+                LDA Fat12_next_entry
+                CMP #$FFE
+                BCS READ_NEXT_FILE
+                BRA Read_next_sector
+end_loop        BRA end_loop
+
+                ; FAT 12 test code END
+                ;---------------------------------------------------------------
                 CLI ; Make sure no Interrupt will come and fuck up Init before this point.
 
                 setas
-                setdbr $01      ;set data bank to 1 (Kernel Variables)
-
+                setdbr `greet_msg      ;set data bank to 19 (Kernel Variables)
 endlessloop     NOP
+                LDA KEY_BUFFER_CMD
+                CMP #$01
+                BEQ GoProcessCommandLine
+
                 JML endlessloop
+GoProcessCommandLine
+                LDA #$00  ; Clear the Flag
+                STA KEY_BUFFER_CMD
+                JSL PROCESS_COMMAND_LINE
+                LDX #<>ready_msg
+                JSL IPRINT
+                BRA  endlessloop
+
 
 greet_done      BRK             ;Terminate boot routine and go to Ready handler.
 
@@ -204,39 +825,39 @@ IGETCHE         JSL IGETCHW
 ; A: Character read
 ; Carry: 1 if no valid data
 ;
-IGETCHW         PHD
-                PHX
-                PHP
-                setdp $0F00
-                setaxl
+IGETCHW         ;PHD
+                ;PHX
+                ;PHP
+                ;setdp $0F00
+                ;setaxl
                 ; Read from the keyboard buffer
                 ; If the read position and write position are the same
                 ; no data is waiting.
-igetchw1        LDX KEY_BUFFER_RPOS
-                CPX KEY_BUFFER_WPOS
+;igetchw1        LDX KEY_BUFFER_RPOS
+                ;;CPX KEY_BUFFER_WPOS
                 ; If data is waiting. return it.
-                ; Otherwise wait for data.
-                BNE igetchw2
-                ;SEC            ; In non-waiting version, set the Carry bit and return
-                ;BRA igetchw_done
-                ; Simulator should wait for input
-                SIM_WAIT
-                JMP igetchw1
-igetchw2        LDA $0,D,X  ; Read the value in the keyboard buffer
-                PHA
+                ;; Otherwise wait for data.
+                ;BNE igetchw2
+                ;;SEC            ; In non-waiting version, set the Carry bit and return
+                ;;BRA igetchw_done
+                ;; Simulator should wait for input
+                ;SIM_WAIT
+;                JMP igetchw1
+;igetchw2        LDA $0,D,X  ; Read the value in the keyboard buffer
+                ;PHA
                 ; increment the read position and wrap it when it reaches the end of the buffer
-                TXA
-                CLC
-                ADC #$02
-                CMP #KEY_BUFFER_SIZE
-                BCC igetchw3
-                LDA #$0
-igetchw3        STA KEY_BUFFER_RPOS
-                PLA
-
-igetchw_done    PLP
-                PLX             ; Restore the saved registers and return
-                PLD
+                ;TXA
+                ;CLC
+                ;ADC #$02
+                ;CMP #KEY_BUFFER_SIZE
+                ;BCC igetchw3
+                ;LDA #$0
+;igetchw3        STA KEY_BUFFER_RPOS
+                ;PLA
+;
+;igetchw_done    PLP
+                ;PLX             ; Restore the saved registers and return
+;                PLD
                 RTL
 ;
 ; IPRINT
@@ -313,7 +934,7 @@ IPUTB
 ; Prints a carriage return.
 ; This moves the cursor to the beginning of the next line of text on the screen
 ; Modifies: Flags
-IPRINTCR	PHX
+IPRINTCR	      PHX
                 PHY
                 PHP
                 LDX #0
@@ -371,9 +992,65 @@ icsr_nowrap     STX CURSORX
                 PLX
                 RTL
 
-ISRLEFT	        RTL
-ICSRUP	        RTL
-ICSRDOWN	      RTL
+;ISRLEFT
+;Move the cursor left one space
+; Modifies: none
+;
+ISRLEFT
+                PHX
+                PHY
+                PHB
+                PHA
+                setaxl
+                setdp $0
+                LDA CURSORX
+                BEQ isrleft_done_already_zero ; Check that we are not already @ Zero
+                LDX CURSORX
+                DEX
+                STX CURSORX
+                LDY CURSORY
+                JSL ILOCATE
+isrleft_done_already_zero
+                PLA
+                PLB
+                PLY
+                PLX
+                RTL
+
+;ICSRUP
+;Move the cursor up one space
+; This routine doesn't wrap the cursor when it reaches the top, it just stays at the top
+; Modifies: none
+;
+ICSRUP
+                PHX
+                PHY
+                PHB
+                PHA
+                setaxl
+                setdp $0
+                LDA CURSORY
+                BEQ isrup_done_already_zero ; Check if we are not already @ Zero
+                LDY CURSORY
+                DEY
+                STY CURSORY
+                LDX CURSORX
+                JSL ILOCATE
+isrup_done_already_zero
+                PLA
+                PLB
+                PLY
+                PLX
+                RTL
+
+;ICSRUP
+;Move the cursor down one space
+; When it reaches the bottom. Every time it go over the limit, the screen is scrolled up. (Text + Color)
+; It will replicate the Color of the last line before it is scrolled up.
+; Modifies: none
+;
+ICSRDOWN
+                RTL
 
 ;ILOCATE
 ;Sets the cursor X and Y positions to the X and Y registers
@@ -872,7 +1549,7 @@ initFontsetbranch0
                 NOP
                 LDX #$0000
 initFontsetbranch1
-                LDA @lBM437_ATI_8X8_Font_Set,X
+                LDA @lFONT_4_BANK1,X
                 STA @lFONT_MEMORY_BANK1,X ; Vicky FONT RAM Bank
                 INX
                 CPX #$0800
@@ -892,7 +1569,7 @@ initFontsetbranch1
 ;  Vicky's Internal Cursor's Registers
 IINITCURSOR     PHA
                 setas
-                LDA #$A0      ;The Cursor Character will be a Fully Filled Block
+                LDA #$B1      ;The Cursor Character will be a Fully Filled Block
                 STA VKY_TXT_CURSOR_CHAR_REG
                 LDA #$03      ;Set Cursor Enable And Flash Rate @1Hz
                 STA VKY_TXT_CURSOR_CTRL_REG ;
@@ -1050,8 +1727,8 @@ IINITKEYBOARD	  PHD
 
                 BRL initkb_loop_out
 
-passAAtest      ;LDX #<>pass_tst0xAAmsg
-                ;JSL IPRINT      ; print Message
+passAAtest      LDX #<>pass_tst0xAAmsg
+                JSL IPRINT      ; print Message
 ;; Test AB
 				        LDA #$AB			;Send test Interface command
 				        STA KBD_CMD_BUF
@@ -1064,8 +1741,8 @@ passAAtest      ;LDX #<>pass_tst0xAAmsg
 
                 BRL initkb_loop_out
 
-passABtest      ;LDX #<>pass_tst0xABmsg
-                ;JSL IPRINT       ; print Message
+passABtest      LDX #<>pass_tst0xABmsg
+                JSL IPRINT       ; print Message
 ;; Program the Keyboard & Enable Interrupt with Cmd 0x60
                 LDA #$60            ; Send Command 0x60 so to Enable Interrupt
                 STA KBD_CMD_BUF
@@ -1076,41 +1753,58 @@ passABtest      ;LDX #<>pass_tst0xABmsg
                 STA KBD_DATA_BUF
 
                 JSR Poll_Inbuf ;
-
-                ;LDX #<>pass_cmd0x60msg
-                ;JSL IPRINT       ; print Message
+;
+                LDX #<>pass_cmd0x60msg
+                JSL IPRINT       ; print Message
 ;; Reset Keyboard
-;                LDA #$FF      ; Send Keyboard Reset command
-;                STA KBD_DATA_BUF
+                LDA #$FF      ; Send Keyboard Reset command
+                STA KBD_DATA_BUF
                 ; Must wait here;
-;                LDX #$FFFF
-;DLY_LOOP1       DEX
-;                CPX #$0000
-;                BNE DLY_LOOP1
+                LDX #$FFFF
+DLY_LOOP1       DEX
+                NOP
+                NOP
+                NOP
+                NOP
+                NOP
+                NOP
+                NOP
+                NOP
+                CPX #$0000
+                BNE DLY_LOOP1
 
-;                JSR Poll_Outbuf ;
+                JSR Poll_Outbuf ;
 
-;                LDA KBD_OUT_BUF   ; Read Output Buffer
+                LDA KBD_OUT_BUF   ; Read Output Buffer
 
-;                LDX #<>pass_cmd0xFFmsg
-;                JSL IPRINT       ; print Message
+                LDX #<>pass_cmd0xFFmsg
+                JSL IPRINT       ; print Message
+;
 ;; Test Echo - Cmd$EE
                 LDA #$EE      ; Send Keyboard Reset command
                 STA KBD_DATA_BUF
 
                 LDX #$4000
 DLY_LOOP2       DEX
+                NOP
+                NOP
+                NOP
+                NOP
+                NOP
+                NOP
+                NOP
+                NOP
                 CPX #$0000
                 BNE DLY_LOOP2
 
                 JSR Poll_Outbuf ;
 
-                LDA KBD_OUT_BUF
-                CMP #$EE
-                BNE initkb_loop_out
+                ;LDA KBD_OUT_BUF
+                ;CMP #$EE
+                ;BNE initkb_loop_out
 
-                ;LDX #<>pass_cmd0xEEmsg
-                ;JSL IPRINT       ; print Message
+                LDX #<>pass_cmd0xEEmsg
+                JSL IPRINT       ; print Message
 
 				        LDA #$F4			; Enable the Keyboard
 				        STA KBD_DATA_BUF
@@ -1126,8 +1820,6 @@ DLY_LOOP2       DEX
                 LDA @lINT_MASK_REG1
                 AND #~FNX1_INT00_KBD
                 STA @lINT_MASK_REG1
-
-
 
                 LDX #<>Success_kb_init
                 SEC
@@ -1696,7 +2388,9 @@ IRQ_HANDLER_FETCH
 
                 ; Check for CTRL Press or Unpressed
                 CMP #$1D                ; Left CTRL pressed
-                BEQ KB_SET_CTRL
+                BNE NOT_KB_SET_CTRL
+                BRL KB_SET_CTRL
+NOT_KB_SET_CTRL
                 CMP #$9D                ; Left CTRL Unpressed
                 BNE KB_CHECK_ALT
                 BRL KB_CLR_CTRL
@@ -1741,7 +2435,11 @@ ALT_KEY_ON      LDA @lScanCode_Alt_Set1, x
 
                 ; Write Character to Screen (Later in the buffer)
 KB_WR_2_SCREEN
+                PHA
                 setxl
+                JSL SAVECHAR2CMDLINE
+
+                PLA
                 JSL PUTC
                 JMP KB_CHECK_B_DONE
 
@@ -1830,11 +2528,25 @@ ISCRGETWORD     BRK ; Read a current word on the screen. A word ends with a spac
 ; Greeting message and other kernel boot data
 ;
 KERNEL_DATA
-greet_msg       .text $20, $20, $20, $20, $EC, $A9, $EC, $A9, $EC, $A9, $EC, $A9, $EC, $A9, "C256 FOENIX DEVELOPMENT SYSTEM",$0D
-                .text $20, $20, $20, $EC, $A9, $EC, $A9, $EC, $A9, $EC, $A9, $EC, $A9, $20, "Software Development Team: TBD",$0D
-                .text $20, $20, $EC, $A9, $EC, $A9, $EC, $A9, $EC, $A9, $EC, $A9, $20, $20, "Hardware platform Created by: Stefany Allaire",$0D
-                .text $20, $EC, $A9, $EC, $A9, $EC, $A9, $EC, $A9, $EC, $A9, $20, $20, $20, "www.c256foenix.com",$0D
-                .text $EC, $A9, $EC, $A9, $EC, $A9, $EC, $A9, $EC, $A9, $20, $20, $20, $20, "2048KB CODE RAM  4096K VIDEO MEM",$00
+greet_msg       .text $20, $20, $20, $20, $0B, $0C, $0B, $0C, $0B, $0C, $0B, $0C, $0B, $0C, "C256 FOENIX DEVELOPMENT SYSTEM",$0D
+                .text $20, $20, $20, $0B, $0C, $0B, $0C, $0B, $0C, $0B, $0C, $0B, $0C, $20, "May the Power of the 65C816 Bring You Joy!",$0D
+                .text $20, $20, $0B, $0C, $0B, $0C, $0B, $0C, $0B, $0C, $0B, $0C, $20, $20, "System Designed by: Stefany Allaire",$0D
+                .text $20, $0B, $0C, $0B, $0C, $0B, $0C, $0B, $0C, $0B, $0C, $20, $20, $20, "www.c256foenix.com",$0D
+                .text $0B, $0C, $0B, $0C, $0B, $0C, $0B, $0C, $0B, $0C, $20, $20, $20, $20, "2048KB CODE RAM  4096K VIDEO MEM",$0D, $00
+
+old_pc_style_stat
+                .text $D6, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C2
+                .text      $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $B7, $0D
+                .text $BA, " Main Processor     : 65C816      ",$B3," Base Memory Size     : 2048K     ",$BA, $0D
+                .text $BA, " Numeric Processor  : CFP9518     ",$B3," Video Memory Size    : 4096K     ",$BA, $0D
+                .text $BA, " Floppy Driver A:   : Yes         ",$B3," Hard Disk C: Type    : None      ",$BA, $0D
+                .text $BA, " SDCard Card Reader : Yes         ",$B3," Serial Port(s)       : $AF:13F8, ",$BA, $0D
+                .text $BA, " Display Type       : VGA         ",$B3,"                        $AF:12F8  ",$BA, $0D
+                .text $BA, " Foenix Kernel Date : 042219      ",$B3," Parallel Ports(s)    : $AF:1378  ",$BA, $0D
+                .text $BA, " Keyboard Type      : PS2         ",$B3," Sound Chip Installed : OPL2(2)   ",$BA, $0D
+                .text $D3, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C1
+                .text      $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $C4, $BD, $00
+
 
 greet_clr_line1 .text $1D, $1D, $1D, $1D, $1D, $1D, $8D, $8D, $4D, $4D, $2D, $2D, $5D, $5D
 greet_clr_line2 .text $1D, $1D, $1D, $1D, $1D, $8D, $8D, $4D, $4D, $2D, $2D, $5D, $5D, $5D
@@ -1900,6 +2612,9 @@ hello_ml        .null "G 020000",$0D
 
 error_01        .null "ABORT ERROR"
 hex_digits      .text "0123456789ABCDEF",0
+error_FAT       .null "Error in the floppy boot sector, wrong data",$0D
+file_to_load    .text "MSDOS   SYS"
+minus_line       .text "-----------------------------------------------",$0A,$0D,0
 .align 256
 ;                           $00, $01, $02, $03, $04, $05, $06, $07, $08, $09, $0A, $0B, $0C, $0D, $0E, $0F
 ScanCode_Press_Set1   .text $00, $1B, $31, $32, $33, $34, $35, $36, $37, $38, $39, $30, $2D, $3D, $08, $09    ; $00
@@ -2000,4 +2715,6 @@ RANDOM_LUT_Tbl		    .text  $1d, $c8, $a7, $ac, $10, $d6, $52, $7c, $83, $dd, $ce
 				              .text  $8f, $0c, $20, $00, $91, $b6, $45, $9e, $3e, $3d, $66, $7e, $0a, $1c, $6b, $74
 * = $1FF000
 FONT_4_BANK0
+.binary "FONT/Bm437_PhoenixEGA_8x8.bin", 0, 2048
+FONT_4_BANK1
 .binary "FONT/CBM-ASCII_8x8.bin", 0, 2048
